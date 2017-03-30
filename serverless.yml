@@ -1,0 +1,148 @@
+service: browserevents
+
+provider:
+  name: aws
+  runtime: python2.7
+  stage: ${opt:env}
+  cfLogs: true
+  region: ${opt:region}
+  stackTags:
+    application: sqs-browser-events
+    environment: ${opt:env}
+    release-tag: ${self:custom.version}
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:DescribeTable
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+        - dynamodb:GetRecords
+      Resource: "arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.sessionTable}"
+    - Effect: Allow
+      Action:
+        - logs:CreateLogGroup
+        - logs:CreateLogStream
+        - logs:PutLogEvents
+      Resource: "arn:aws:logs:*:*:*"
+    - Effect: Allow
+      Action:
+        - lambda:*
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - kinesis:GetRecords
+        - kinesis:GetShardIterator
+        - kinesis:DescribeStream
+        - kinesis:ListStreams
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - cognito-identity:*
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - sqs:*
+      Resource: "*"
+  environment:
+    SESSION_TABLE: ${self:custom.sessionTable}
+    COGNITO_IDENTITY_POOL: sqs_browser
+    SQS_QUEUE_PREFIX: ${opt:env}-brws-
+  include:
+    - lib/**
+custom:
+  version: 1.0.0
+  region: ${opt:region}
+  sessionTable: ${opt:env}-sqs-browser-sessions
+  browserEventStream: ${opt:env}-sqs-browser-event-stream
+functions:
+  SessionManagerCleanup:
+    handler: session_manager.cleanup_lambda_handler
+    name: ${opt:env}-sqs-browser-session-manager-cleanup
+    memorySize: 512
+    timeout: 300
+    description: API Gateway for session cleanup, should be called periodically, version ${self:custom.version}
+  SessionManagerAPI:
+    handler: session_manager.api_gateway_handler
+    name: ${opt:env}-sqs-browser-session-manager-api
+    memorySize: 512
+    timeout: 55
+    description: API Gateway for session creation, removal, version ${self:custom.version}
+    events:
+      - http:
+          method: get
+          path: /create/{account_id}/{session_id}
+      - http:
+          method: get
+          path: /destroy/{account_id}/{session_id}
+      - http:
+          method: get
+          path: /renew/{account_id}/{session_id}
+      - http:
+          method: get
+          path: /status/{account_id}/{session_id}
+      - http:
+          method: get
+          path: /status
+      - http:
+          method: get
+          path: /cleanup
+  EventDispatcher:
+    handler: dispatcher.lambda_handler
+    name: ${opt:env}-sqs-browser-event-dispatcher
+    memorySize: 512
+    timeout: 55
+    description: dispatch user messsages, invoke directly or via Kinesis stream, version ${self:custom.version}  
+    events:
+      - stream:
+          type: kinesis
+          arn:
+            Fn::GetAtt:
+              - browserEventStream
+              - Arn
+  DispatcherAPI:
+    handler: dispatcher.api_gateway_handler
+    name: ${opt:env}-sqs-browser-dispatcher-api
+    memorySize: 512
+    timeout: 55
+    description: dispatch user messsages, version ${self:custom.version}
+    events:
+      - http:
+          method: get
+          path: /notify/{account_id}
+      - http:
+          method: get
+          path: /notify/{account_id}/session/{session_id}
+      - http:
+          method: get
+          path: /notify/{account_id}/session/{session_id}/user/{user_id}
+      - http:
+          method: get
+          path: /notify/{account_id}/user/{user_id}
+resources:
+  Resources:
+    browserEventStream:
+      Type: AWS::Kinesis::Stream
+      Properties:
+        Name: ${self:custom.browserEventStream}
+        ShardCount: 1
+    sessionTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.sessionTable}
+        AttributeDefinitions:
+          - AttributeName: accountId
+            AttributeType: N
+          - AttributeName: sessionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: accountId
+            KeyType: HASH
+          - AttributeName: sessionId
+            KeyType: RANGE
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5

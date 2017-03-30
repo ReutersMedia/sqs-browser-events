@@ -1,0 +1,12 @@
+*~
+*.jar
+*#
+build
+dist
+*.pyc
+*.egg-info
+RELEASE-VERSION
+.DS_Store
+.serverless
+node_modules
+gp-events.iml
