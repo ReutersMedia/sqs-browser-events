@@ -41,7 +41,7 @@ In the API calls below, the accountId must be an integer, and sessionId must be 
 
 ```
    {
-      "sqsUrl": "https://eu-west-1.queue.amazonaws.com/552185127352/kentest1-brws-KLK0dJ6AN9USg6CAx8FXVk52G2M",
+      "sqsUrl": "https://eu-west-1.queue.amazonaws.com/XXXXXXXXX/kentest1-brws-KLK0dJ6AN9USg6CAx8FXVk52G2M",
       "accessKey": "XXXX",
       "expires": 1490867032,
       "identityId": "eu-west-1:bfb4c749-4c0e-446a-892e-defd9b01bed0",
