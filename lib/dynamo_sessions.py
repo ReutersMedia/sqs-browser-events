@@ -27,11 +27,10 @@ def delete_expired():
     t = get_session_table()
     del_cnt = 0
     while True:
-        q = {'Select': 'SELECTED_ATTRIBUTES',
-             'AttributesToGet': ['accountId','sessionId'],
+        q = {'ProjectionExpression': "accountId, sessionId",
              'Limit':1000,
              'FilterExpression': Attr('expires').lt(int(time.time())-86400*2)}
-        sessions = collect_results(t.query,q)
+        sessions = collect_results(t.scan,q)
         for s in sessions:
             LOGGER.info("Deleting expired session, accountId={0}, sessionId={1}".format(
                 s['accountId'],s['sessionId']))
@@ -65,9 +64,10 @@ def get_all_sessions():
     return collect_results(get_session_table().scan,q)
 
 def get_all_sqs_urls():
-    q = {'Select': 'SELECTED_ATTRIBUTES',
+    q = {'Select': 'SPECIFIC_ATTRIBUTES',
          'AttributesToGet': ['sqsUrl']}
-    return collect_results(get_session_table().scan,q)
+    items = collect_results(get_session_table().scan,q)
+    return [x['sqsUrl'] for x in items]
 
 
 def collect_results(table_f,qp):

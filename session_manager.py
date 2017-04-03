@@ -185,7 +185,7 @@ SQS_NAME_CHARS = [ chr(x) for x in range(97,123)+range(65,91)+range(48,58) ] + [
 
 def cleanup_queues():
     prefix = os.getenv('SQS_NAME_PREFIX')
-    db_queues = get_all_sqs_urls()
+    db_queues = dynamo_sessions.get_all_sqs_urls()
     # SQS list_queues is limited to 1000, so may need to split up the queries.
     # we only need to split up if db_queues is very long.
     # if db_queues is short and actual number of queues is > 1000, we will delete
@@ -203,9 +203,16 @@ def cleanup_queues():
     return n
     
 def remove_unused_queues(sqs_name_prefix,db_queues):
-    db_queues = set(get_all_sqs_urls())
+    db_queues = set(dynamo_sessions.get_all_sqs_urls())
     c = boto3.client('sqs')
-    aws_queues = c.list_queues(sqs_name_prefix)
+    if sqs_name_prefix is None:
+        r = c.list_queues()
+    else:
+        r = c.list_queues(QueueNamePrefix=sqs_name_prefix)
+    aws_queues = r.get('QueueUrls')
+    if aws_queues == None:
+        LOGGER.info("No queues to purge")
+        return
     # delete ones in aws_queues that aren't in db_queues
     def del_q(x):
         LOGGER.info("Deleting queue {0}".format(x))
@@ -213,7 +220,7 @@ def remove_unused_queues(sqs_name_prefix,db_queues):
             c.delete_queue(QueueUrl=q)
         except:
             LOGGER.exception("Error removing queue {0}".format(x))
-    [ del_q(q) for q in aws_queues if q not in db_queue ]
+    [ del_q(q) for q in aws_queues if q not in db_queues ]
 
 def gen_json_resp(d, code='200'):
     return {'statusCode': code,

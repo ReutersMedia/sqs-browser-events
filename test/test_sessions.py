@@ -215,7 +215,7 @@ class TestSessions(unittest.TestCase):
         self.assertNotIn('Item',r)
         sqs_c = boto3.client('sqs')
         queues = sqs_c.list_queues(QueueNamePrefix=item['sqsQueueName'])
-        self.assertEqual(len(queues['QueueUrls']),0)
+        self.assertNotIn('QueueUrls',queues)
             
         
 if __name__=="__main__":
