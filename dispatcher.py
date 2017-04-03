@@ -14,6 +14,7 @@ import dynamo_sessions
 import common
 
 import pyaes
+import random
 
 import logging
 LOGGER = logging.getLogger(__name__)
@@ -24,15 +25,20 @@ class DispatcherException(Exception):
 
 def send_to_sqs(r, sqs_url, aes_key):
     c = boto3.client('sqs')
-    aes = pyaes.AESModeOfOperationCTR(aes_key)
-    m = base64.b64encode(aes.encrypt(json.dumps(r)))
+    init_ctr = random.randint(0,9999999999) # OK if crappy python pseudo-random, only to prevent dupe blocks
+    ctr = pyaes.Counter(initial_value=init_ctr)
+    aes = pyaes.AESModeOfOperationCTR(aes_key,counter=ctr)
+    m = str(init_ctr)+'|'+base64.b64encode(aes.encrypt(json.dumps(r)))
     c.send_message(QueueUrl=sqs_url,
                    MessageBody=m)
     return sqs_url
 
 def parse_account_id(path_p):
     try:
-        return int(path_p['account_id'])
+        if 'account_id' in path_p:
+            return int(path_p['account_id'])
+        else:
+            return int(path_p['accountId'])
     except:
         LOGGER.exception("must provide an integer account ID")
         raise DispatcherException("Invalid accountId, must be integer")
@@ -40,8 +46,10 @@ def parse_account_id(path_p):
 def dispatch(m):
     # look up queues
     queues = dynamo_sessions.lookup(parse_account_id(m),
-                                    m.get('sessionId'),
-                                    m.get('userId'))
+                                    session_id=m.get('sessionId',m.get('session_id')),
+                                    user_id=m.get('userId',m.get('user_id')))
+    # unique initialization vector for AES
+    LOGGER.info("Dispatching message to {0} queues".format(len(queues)))
     return [send_to_sqs(m,x['sqsUrl'],base64.b64decode(x['aesKey'])) for x in queues]
         
 
@@ -56,14 +64,14 @@ def proc_rec(rec):
     try:
         r = None
         if 'kinesis' in rec:
-            r = json.loads(base64.b64decode(rec['data']))
+            r = json.loads(base64.b64decode(rec['kinesis']['data']))
         if r is not None:
             dispatch(r)
     except:
         LOGGER.exception("Unable to dispatch record {0!r}".format(rec))
             
             
-def lambda_hander(event, context):
+def lambda_handler(event, context):
     LOGGER.debug("Received event: {0!r}".format(event))
     recs = event['Records']
     # kinesis events are in order, others are not

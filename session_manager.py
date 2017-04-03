@@ -110,7 +110,7 @@ def create_sqs_queue(account_id, session_id, user_id=None, restrict_ip=None):
          'aesKey':base64.b64encode(aes_key)}
     m.update(cred_d)
     if user_id is not None:
-        m['user_id'] = user_id
+        m['userId'] = user_id
     dynamo_sessions.create(m)
     return m
 
@@ -156,6 +156,7 @@ def renew_session(account_id, session_id):
     cred_d = get_credentials(c,m['identityId'])
     m.update(cred_d)
     dynamo_sessions.create(m)
+    LOGGER.info("renewed session for account_id={0}, session_id={1}".format(account_id,session_id))
     return {"success":True,
             "session":m}
     
@@ -169,6 +170,7 @@ def create_session(account_id, session_id, user_id=None, restrict_ip=None):
         except:
             raise SessionManagerException("Invalid userId: {0!r}".format(user_id))
     m = create_sqs_queue(account_id, session_id, user_id, restrict_ip=restrict_ip)
+    LOGGER.info("created session for account_id={0}, session_id={1}, user_id={2}".format(account_id,session_id,user_id))
     return {"success":True,
             "session":m}
 
@@ -224,10 +226,13 @@ def gen_json_resp(d, code='200'):
 def api_gateway_handler(event, context):
     LOGGER.debug("Received event: {0!r}".format(event))
     path_p = event.get('pathParameters')
+    qsp = event.get('queryStringParameters')
+    if qsp is None:
+        qsp = {}
     try:
         res = event['resource']
         if res.startswith('/create'):
-            r = create_session(parse_account_id(path_p),path_p['session_id'],user_id=path_p.get('user_id'))
+            r = create_session(parse_account_id(path_p),path_p['session_id'],user_id=qsp.get('userId'))
         elif res.startswith('/destroy'):
             r = destroy_session(parse_account_id(path_p),path_p['session_id'])
         elif res.startswith('/renew'):

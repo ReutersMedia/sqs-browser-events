@@ -30,6 +30,18 @@ The Cognito credentials expire after serveral hours, and periodically need to be
 
 Note that messages may accumulate while a user is not active, if they return and the same Session ID is used.
 
+
+## Message Encryption
+
+All messages are encrypted with AES using the counter mode of operation.  You will need to base-64 decode the AES key returned by the session creation call, and parse the SQS Body into a counter initialization value, and a message payload, as shown below.  Split the SQS message on the first pipe '|'.
+
+```
+    init_ctr,enc_msg = m['Body'].split('|',1)
+    ctr = pyaes.Counter(initial_value=int(init_ctr))
+    aes = pyaes.AESModeOfOperationCTR(base64.b64decode(session['aesKey']),counter=ctr)
+    msg = aes.decrypt(base64.b64decode(enc_msg))
+```
+
 ## Creating a Cognito Identity Pool
 
 A stack needs a Cognito user pool, and this cannot be set up via Cloud Formation.  One identity pool however can be shared by a number of stacks, and the serverless.yml file requires a pool with the name "sqs_browser".  This can be overridden with a "--poolname" argument. 
@@ -60,6 +72,28 @@ Then create a new IAM role, with the trust relationship given below, using the P
   ]
 }
 ```
+
+And embed the following inline policy, which allows access to all queues with the given name prefix.  Note that queue message privacy is based on encryption of the queue messages, and use of a cyrptographic hash to generate queue URLs.
+
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sqs:ReceiveMessage",
+                "sqs:GetQueueAttributes",
+                "sqs:DeleteMessage",
+                "sqs:DeleteMessageBatch",
+                "sqs:PurgeQueue"
+            ],
+            "Resource": "arn:aws:sqs:*:*:cognito-sqs-*"
+        }
+    ]
+}
+```
+
 
 ## Session Manager API
 

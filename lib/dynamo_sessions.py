@@ -53,7 +53,7 @@ def lookup(account_id, user_id=None, session_id=None):
     if session_id is None:
         q['KeyConditionExpression'] = Key('accountId').eq(account_id)
         if user_id is not None:
-            q['FilterExpression'] = Attr('userId').eq(user_id) & expires_filter
+            q['FilterExpression'] = Attr('userId').eq(int(user_id)) & expires_filter
     else:
         q['KeyConditionExpression'] = Key('accountId').eq(account_id) & Key('sessionId').eq(session_id)
     return collect_results(get_session_table().query,q)

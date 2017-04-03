@@ -53,7 +53,6 @@ class TestSessions(unittest.TestCase):
             print("calling {0} : {1!r}".format(url,params))
             resp = requests.get(url,params=params,auth=auth)
             d = json.loads(resp.text)
-            #pprint.pprint(d)
             return d
         self.call_gw = call_gateway
 
@@ -71,15 +70,22 @@ class TestSessions(unittest.TestCase):
                              aws_access_key_id=session['accessKey'],
                              aws_secret_access_key=session['secretKey'],
                              aws_session_token=session['sessionToken'])
-        print("Checking queue {0}".format(session['sqsUrl']))
-        r = sqs_c.receive_message(QueueUrl=session['sqsUrl'],
-                                  MaxNumberOfMessages=10)
         msgs = []
-        aes = pyaes.AESModeOfOperationCTR(base64.b64decode(session['aesKey']))
-        for m in r['Messages']:
-            msgs.append(json.loads(aes.decrypt(base64.b64decode(m['Body']))))
-            sqs_c.delete_message(QueueUrl=session['sqsUrl'],
-                                 ReceiptHandle=m['ReceiptHandle'])
+        while True:
+            print("Checking queue {0}".format(session['sqsUrl']))
+            r = sqs_c.receive_message(QueueUrl=session['sqsUrl'],
+                                      MaxNumberOfMessages=10)            
+            if 'Messages' not in r:
+                break
+            for m in r['Messages']:
+                init_ctr,msg = m['Body'].split('|',1)
+                ctr = pyaes.Counter(initial_value=int(init_ctr))
+                aes = pyaes.AESModeOfOperationCTR(base64.b64decode(session['aesKey']),counter=ctr)
+                dec_m = aes.decrypt(base64.b64decode(msg))
+                print("   Found message: {0}".format(dec_m))
+                msgs.append(json.loads(dec_m))
+                sqs_c.delete_message(QueueUrl=session['sqsUrl'],
+                                     ReceiptHandle=m['ReceiptHandle'])
         return sorted([x['msg'] for x in msgs])
 
     
@@ -127,12 +133,28 @@ class TestSessions(unittest.TestCase):
         msgs_1b = self.get_msgs(s1b)
         msgs_2a = self.get_msgs(s2a)
         msgs_2b = self.get_msgs(s2b)
-
+        pprint.pprint(msgs_1a)
+        pprint.pprint(msgs_1b)
+        pprint.pprint(msgs_2a)
+        pprint.pprint(msgs_2b)
+                
         self.assertListEqual(msgs_1a,['test1','test1-k'])
         self.assertListEqual(msgs_1b,['test1','test1-k','test2','test2-k'])
         self.assertListEqual(msgs_2a,['test3','test3-k'])
         self.assertListEqual(msgs_2b,[])
 
+
+    def test_user_dispatch(self):
+        ac_id1 = random.randint(10000000,50000000)
+        session1a = str(uuid.uuid1())
+        user_id1 = random.randint(80000001,90000000)
+        s = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a),{'userId':user_id1})['session']
+        r = self.call_gw('/notify/{0}/user/{1}'.format(ac_id1,user_id1),{'msg':'test9'})
+        time.sleep(5)
+        msgs = self.get_msgs(s)
+        self.assertListEqual(msgs,['test9'])
+
+        
     def test_renew(self):
         ac_id1 = random.randint(10000000,50000000)
         session1a = str(uuid.uuid1())
@@ -182,8 +204,8 @@ class TestSessions(unittest.TestCase):
         # modify expiration date so 5 days in past
         dynamodb = boto3.resource('dynamodb')
         t = dynamodb.Table(self.props['SESSION_TABLE'])
-        item = clean_item(t.get_item(Key={'accountId':ac_id1,
-                                          'sessionId':session1a})['Item'])
+        item = t.get_item(Key={'accountId':ac_id1,
+                               'sessionId':session1a})['Item']
         item['expires'] = int(time.time()-86400*5)
         t.put_item(Item=item)
         # now clean, should be removed along with it's SQS url
