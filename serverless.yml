@@ -1,9 +1,11 @@
-service: browserevents
+service: sqsbrowserevents
 
 provider:
   name: aws
   runtime: python2.7
   stage: ${opt:env}
+  defPoolName: "sqs_browser"
+  defVersion: "0.0.0"
   cfLogs: true
   region: ${opt:region}
   stackTags:
@@ -49,12 +51,12 @@ provider:
       Resource: "*"
   environment:
     SESSION_TABLE: ${self:custom.sessionTable}
-    COGNITO_IDENTITY_POOL: sqs_browser
-    SQS_QUEUE_PREFIX: ${opt:env}-brws-
+    COGNITO_IDENTITY_POOL: ${opt:poolname, self:provider.defPoolName}
+    SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
   include:
     - lib/**
 custom:
-  version: 1.0.0
+  version: ${opt:version, self:provider.defVersion}
   region: ${opt:region}
   sessionTable: ${opt:env}-sqs-browser-sessions
   browserEventStream: ${opt:env}-sqs-browser-event-stream
@@ -65,6 +67,9 @@ functions:
     memorySize: 512
     timeout: 300
     description: API Gateway for session cleanup, should be called periodically, version ${self:custom.version}
+    events:
+      - schedule:
+          rate: cron(15 */6 * * ? *)
   SessionManagerAPI:
     handler: session_manager.api_gateway_handler
     name: ${opt:env}-sqs-browser-session-manager-api
@@ -118,12 +123,36 @@ functions:
           path: /notify/{account_id}/session/{session_id}
       - http:
           method: get
-          path: /notify/{account_id}/session/{session_id}/user/{user_id}
-      - http:
-          method: get
           path: /notify/{account_id}/user/{user_id}
 resources:
   Resources:
+    ApiGatewayMethodCreateAccountidVarSessionidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodDestroyAccountidVarSessionidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodRenewAccountidVarSessionidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodStatusAccountidVarSessionidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodStatusGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodCleanupGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodNotifyAccountidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodNotifyAccountidVarSessionSessionidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodNotifyAccountidVarUserUseridVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
     browserEventStream:
       Type: AWS::Kinesis::Stream
       Properties:

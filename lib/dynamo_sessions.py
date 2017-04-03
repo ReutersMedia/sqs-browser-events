@@ -1,5 +1,6 @@
 import os
 import time
+import decimal
 
 import boto3
 
@@ -10,6 +11,7 @@ import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 
+
 def get_session_table():
     dynamodb = boto3.resource('dynamodb')
     return dynamodb.Table(os.getenv('SESSION_TABLE'))
@@ -19,6 +21,26 @@ def create(d):
     LOGGER.debug("Created session {0} for account {1}, queue={2}".format(d['sessionId'],d['accountId'],d['sqsUrl']))
     return d
 
+def delete_expired():
+    # delete ones that expired more than 2 days ago
+    # put in limit to ensure progress before potential timeout
+    t = get_session_table()
+    del_cnt = 0
+    while True:
+        q = {'Select': 'SELECTED_ATTRIBUTES',
+             'AttributesToGet': ['accountId','sessionId'],
+             'Limit':1000,
+             'FilterExpression': Attr('expires').lt(int(time.time())-86400*2)}
+        sessions = collect_results(t.query,q)
+        for s in sessions:
+            LOGGER.info("Deleting expired session, accountId={0}, sessionId={1}".format(
+                s['accountId'],s['sessionId']))
+            t.delete_item(Key={'accountId':s['accountId'],
+                               'sessionId':s['sessionId']})
+            del_cnt += 1
+        if len(sessions)<1000:
+            break
+    return del_cnt
 
 def destroy(account_id, session_id):
     get_session_table().delete_item(Key={'accountId':account_id,

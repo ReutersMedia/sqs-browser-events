@@ -49,9 +49,10 @@ def get_credentials(cog_client, cog_id):
     r = cog_client.get_credentials_for_identity(IdentityId=cog_id)
     return {'accessKey': r['Credentials']['AccessKeyId'],
             'secretKey': r['Credentials']['SecretKey'],
+            'sessionToken': r['Credentials']['SessionToken'],
             'expires': int(time.mktime(r['Credentials']['Expiration'].utctimetuple()))}
     
-def create_sqs_queue(account_id, session_id, user_id=None):
+def create_sqs_queue(account_id, session_id, user_id=None, restrict_ip=None):
     # first lookup to see if we already have for this session
     d = dynamo_sessions.lookup(account_id, session_id=session_id)
     if len(d)>= 1:
@@ -63,37 +64,50 @@ def create_sqs_queue(account_id, session_id, user_id=None):
     r = cog_c.get_id(IdentityPoolId=pool_id)
     cog_id = r['IdentityId']
     cred_d = get_credentials(cog_c,cog_id)
-    policy = {'Version': '2012-10-17',
-              'Statement':[{'Effect': "Allow",
-                            'Action': [
-                                "sqs:ReceiveMessage",
-                                "sqs:GetQueueAttributes"
-                            ],
-                            'Condition': {
-                                'StringEquals': {
-                                    "cognito-identity.amazonaws.com:sub":cog_id}
-                            },
-                            'Resource': "*"}
-                           ]}
+    if restrict_ip is not None:
+        policy = {'Version': '2012-10-17',
+                  'Statement':[{'Effect': "Allow",
+                                'Action': [
+                                    "sqs:ReceiveMessage",
+                                    "sqs:GetQueueAttributes"
+                                ],
+                                'Condition': {
+                                    'IpAddress': {
+                                        "aws:SourceIp":restrict_ip}
+                                },
+                                'Resource': "*"}
+                  ]}
+    else:
+        policy = None
     # use hash to generate queue name based on account, session
     # this ensures it is well-distributed, which will be useful when
     # we need to scroll through a large number of queues
     queue_name = os.getenv('SQS_QUEUE_PREFIX') + \
                  base64.urlsafe_b64encode(hashlib.sha1("{0}-{1}".format(account_id,session_id)).digest()).replace('=','')
+    # unix /dev/random has more entropy than /dev/urandom, and python random
+    with open('/dev/random','rb') as f_rand:
+        aes_key = f_rand.read(32)
     try:
-        r = sqs_c.create_queue(QueueName=queue_name,
-                               Attributes={'Policy':json.dumps(policy)})
+        if policy is not None:
+            r = sqs_c.create_queue(QueueName=queue_name,
+                                   Attributes={'Policy':json.dumps(policy)})
+        else:
+            r = sqs_c.create_queue(QueueName=queue_name)
     except botocore.errorfactory.ClientError, err:
-        if err.response['Error']['Code']=='QueueAlreadyExists':
+        if err.response['Error']['Code']=='QueueAlreadyExists' and policy is not None:
             LOGGER.info("Queue {0} already exists, resetting policy".format(queue_name))
             r = sqs_c.get_queue_url(QueueName=queue_name)
             sqs_c.set_queue_attributes(QueueUrl=r['QueueUrl'],
                                        Attributes={'Policy':json.dumps(policy)})
     queue_url = r['QueueUrl']
+    # create an encryption key
+    
     m = {'accountId':account_id,
          'sessionId':session_id,
          'sqsUrl':queue_url,
-         'identityId':cog_id}
+         'sqsQueueName':queue_name,
+         'identityId':cog_id,
+         'aesKey':base64.b64encode(aes_key)}
     m.update(cred_d)
     if user_id is not None:
         m['user_id'] = user_id
@@ -146,7 +160,7 @@ def renew_session(account_id, session_id):
             "session":m}
     
     
-def create_session(account_id, session_id, user_id=None):
+def create_session(account_id, session_id, user_id=None, restrict_ip=None):
     if len(session_id)>256:
         raise SessionManagerException("sessionId can not be longer than 256 characters")
     if user_id is not None:
@@ -154,13 +168,15 @@ def create_session(account_id, session_id, user_id=None):
             user_id = int(user_id)
         except:
             raise SessionManagerException("Invalid userId: {0!r}".format(user_id))
-    m = create_sqs_queue(account_id, session_id, user_id)
+    m = create_sqs_queue(account_id, session_id, user_id, restrict_ip=restrict_ip)
     return {"success":True,
             "session":m}
 
 
 def cleanup_sessions():
-    expired_sessions = dynamo_sessions.delete_expired()
+    n = dynamo_sessions.delete_expired()
+    LOGGER.info("Removed {0} sessions".format(n))
+    return n
 
     
 SQS_NAME_CHARS = [ chr(x) for x in range(97,123)+range(65,91)+range(48,58) ] + ['-','_']
@@ -180,8 +196,9 @@ def cleanup_queues():
         prefixes = [ prefix+i for i in SQS_NAME_CHARS ]
     else:
         prefixes = [ prefix ]
-    [remove_unused_queues(x,db_queues) for x in prefixes]  
-    return {"success":True}
+    n = len([remove_unused_queues(x,db_queues) for x in prefixes])
+    LOGGER.info("Removed {0} queues".format(n))
+    return n
     
 def remove_unused_queues(sqs_name_prefix,db_queues):
     db_queues = set(get_all_sqs_urls())
@@ -221,7 +238,9 @@ def api_gateway_handler(event, context):
             else:
                 r = get_session_status(parse_account_id(path_p),path_p['session_id'])
         elif res.startswith('/cleanup'):
-            r = cleanup_queues()
+            return {'sessions_removed':cleanup_sessions(),
+                    'queues_removed':cleanup_queues(),
+                    'success':True}
         else:
             raise SessionManagerException("Unrecognized action")
         return gen_json_resp(r)
@@ -233,4 +252,5 @@ def api_gateway_handler(event, context):
     
 def cleanup_lambda_handler(event, context):
     LOGGER.info("Cleanup handler called")
+    cleanup_sessions()
     cleanup_queues()

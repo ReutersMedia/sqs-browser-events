@@ -13,6 +13,8 @@ sys.path.append(os.path.join(current_path, './lib'))
 import dynamo_sessions
 import common
 
+import pyaes
+
 import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
@@ -20,15 +22,14 @@ LOGGER.setLevel(logging.INFO)
 class DispatcherException(Exception):
     pass
 
-
-def send_to_sqs(r, sqs_url):
+def send_to_sqs(r, sqs_url, aes_key):
     c = boto3.client('sqs')
+    aes = pyaes.AESModeOfOperationCTR(aes_key)
+    m = base64.b64encode(aes.encrypt(json.dumps(r)))
     c.send_message(QueueUrl=sqs_url,
-                   MessageBody=json.dumps(r))
+                   MessageBody=m)
     return sqs_url
 
-
-    
 def parse_account_id(path_p):
     try:
         return int(path_p['account_id'])
@@ -41,7 +42,7 @@ def dispatch(m):
     queues = dynamo_sessions.lookup(parse_account_id(m),
                                     m.get('sessionId'),
                                     m.get('userId'))
-    return [send_to_sqs(m,x['sqsUrl']) for x in queues]
+    return [send_to_sqs(m,x['sqsUrl'],base64.b64decode(x['aesKey'])) for x in queues]
         
 
 def k_seq(x):
