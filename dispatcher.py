@@ -4,6 +4,7 @@ import os
 import sys
 import base64
 import json
+import concurrent.futures
 
 import boto3
 
@@ -23,7 +24,9 @@ LOGGER.setLevel(logging.INFO)
 class DispatcherException(Exception):
     pass
 
-def send_to_sqs(r, sqs_url, aes_key):
+def send_to_sqs(r, q):
+    sqs_url = q['sqsUrl']
+    aes_key = base64.b64decode(q['aesKey'])
     c = boto3.client('sqs')
     init_ctr = random.randint(0,9999999999) # OK if crappy python pseudo-random, only to prevent dupe blocks
     ctr = pyaes.Counter(initial_value=init_ctr)
@@ -34,8 +37,8 @@ def send_to_sqs(r, sqs_url, aes_key):
                        MessageBody=m)
     except:
         LOGGER.error("Unable to send to queue {0}".format(sqs_url))
-        # ignore and continue, may be expired queue
-    return sqs_url
+        return False
+    return True
 
 def parse_id(path_p,field):
     try:
@@ -51,7 +54,15 @@ def dispatch(m):
                                     user_id=parse_id(m,'userId'))
     # unique initialization vector for AES
     LOGGER.info("Dispatching message to {0} queues".format(len(queues)))
-    return [send_to_sqs(m,x['sqsUrl'],base64.b64decode(x['aesKey'])) for x in queues]
+    sqs_urls = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_sqsurl = {executor.submit(send_to_sqs, m, q): q for q in queues}
+        for future in concurrent.futures.as_completed(future_to_sqsurl):
+            sqs_url = future_to_sqsurl[future]
+            success = future.result()
+            if success:
+                sqs_urls.append(sqs_url)
+    return sqs_urls
         
 
 def k_seq(x):
