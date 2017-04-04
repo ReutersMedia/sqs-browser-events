@@ -18,7 +18,7 @@ def get_session_table():
 
 def create(d):
     get_session_table().put_item(Item=d)
-    LOGGER.debug("Created session {0} for account {1}, queue={2}".format(d['sessionId'],d['accountId'],d['sqsUrl']))
+    LOGGER.debug("Created session {0} for account {1}, user {3}, queue={2}".format(d['sessionId'],d['accountId'],d['userId'],d['sqsUrl']))
     return d
 
 def delete_expired():
@@ -26,41 +26,62 @@ def delete_expired():
     # put in limit to ensure progress before potential timeout
     t = get_session_table()
     del_cnt = 0
+    max_age = int(os.getenv('SESSION_INACTIVE_PURGE_SEC',86400))
     while True:
-        q = {'ProjectionExpression': "accountId, sessionId",
+        q = {'ProjectionExpression': "userId, sessionId",
              'Limit':1000,
-             'FilterExpression': Attr('expires').lt(int(time.time())-86400*2)}
+             'FilterExpression': Attr('expires').lt(int(time.time()-max_age))}
         sessions = collect_results(t.scan,q)
         for s in sessions:
-            LOGGER.info("Deleting expired session, accountId={0}, sessionId={1}".format(
-                s['accountId'],s['sessionId']))
-            t.delete_item(Key={'accountId':s['accountId'],
+            LOGGER.info("Deleting expired session, userId={0}, sessionId={1}".format(
+                s['userId'],s['sessionId']))
+            t.delete_item(Key={'userId':s['userId'],
                                'sessionId':s['sessionId']})
             del_cnt += 1
         if len(sessions)<1000:
             break
     return del_cnt
 
-def destroy(account_id, session_id):
-    get_session_table().delete_item(Key={'accountId':account_id,
+def destroy(account_id, user_id, session_id):
+    get_session_table().delete_item(Key={'userId':user_id,
                                          'sessionId':session_id})
 
-def lookup(account_id, user_id=None, session_id=None):
-    expires_filter = Attr('expires').gte(int(time.time()))
-    q = {'Select': 'ALL_ATTRIBUTES',
-         'FilterExpression': expires_filter}
-    if session_id is None:
+def lookup(account_id=None, user_id=None, session_id=None, max_expired_age=None):
+    q = {'Select': 'ALL_ATTRIBUTES'}
+    if user_id is not None:
+        q['KeyConditionExpression'] = Key('userId').eq(user_id)
+        if session_id is not None:
+            q['KeyConditionExpression'] = q['KeyConditionExpression'] & Key('sessionId').eq(session_id)
+        if account_id is not None:
+            q['FilterExpression'] = Attr('accountId').eq(account_id)
+    elif account_id is not None:
+        # use the account GSI
         q['KeyConditionExpression'] = Key('accountId').eq(account_id)
-        if user_id is not None:
-            q['FilterExpression'] = Attr('userId').eq(int(user_id)) & expires_filter
+        q['IndexName'] = os.getenv('SESSION_TABLE_ACCOUNT_GSI')
+        if session_id is not None:
+            q['FilterExpression'] = Attr('sessionId').eq(session_id)
+    elif session_id is not None:
+        q['FilterExpression'] = Attr('sessionId').eq(session_id)
     else:
-        q['KeyConditionExpression'] = Key('accountId').eq(account_id) & Key('sessionId').eq(session_id)
-    return collect_results(get_session_table().query,q)
+        return get_all_sessions(max_expired_age=max_expired_age)
+
+    if max_expired_age is not None:
+        exp_filter = Attr('expires').gte(int(time.time()-max_expired_age))
+        if 'FilterExpression' in q:
+            q['FilterExpression'] = q['FilterExpression'] & exp_filter
+        else:
+            q['FilterExpression'] = exp_filter
+
+    if 'KeyConditionExpression' in q:
+        return collect_results(get_session_table().query,q)
+    else:
+        return collect_results(get_session_table().scan,q)
 
 
-def get_all_sessions():
-    q = {'Select': 'ALL_ATTRIBUTES',
-         'FilterExpression': Attr('expires').gte(int(time.time()))}
+def get_all_sessions(max_expired_age=None):
+    q = {'Select': 'ALL_ATTRIBUTES'}
+    if max_expired_age is not None:
+         q['FilterExpression'] = Attr('expires').gte(int(time.time()-max_expired_age))
     return collect_results(get_session_table().scan,q)
 
 def get_all_sqs_urls():

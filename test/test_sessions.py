@@ -97,31 +97,33 @@ class TestSessions(unittest.TestCase):
         session2a = str(uuid.uuid1())
         session2b = str(uuid.uuid1())
         user_id1 = random.randint(80000001,90000000)
-        user_id2 = random.randint(90000001,100000000)
-        r = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a))
+        user_id2 = user_id1 + 1
+        user_id3 = user_id1 + 2
+        user_id4 = user_id1 + 3
+        r = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id3,session1a))
         self.assertTrue(r['success'])
         s1a = r['session']
         self.check_session(s1a)
-        s1b = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1b))['session']
-        s2a = self.call_gw('/create/{0}/{1}'.format(ac_id2,session2a),{'userId':user_id1})['session']
-        s2b = self.call_gw('/create/{0}/{1}'.format(ac_id2,session2b),{'userId':user_id2})['session']
+        s1b = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id4,session1b))['session']
+        s2a = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id2,user_id1,session2a))['session']
+        s2b = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id2,user_id2,session2b))['session']
 
         c = boto3.client('kinesis',region_name=self.props['REGION'])
         # msg to session1a, session1b
-        r = self.call_gw('/notify/{0}'.format(ac_id1),{'msg':'test1'})
+        r = self.call_gw('/notify/account/{0}'.format(ac_id1),{'msg':'test1'})
         c.put_record(StreamName=self.props['EVENT_STREAM'],
                      Data=json.dumps({'accountId':ac_id1,
                                       'msg':'test1-k'}),
                      PartitionKey=str(ac_id1))
         # msg to session1b
-        r = self.call_gw('/notify/{0}/session/{1}'.format(ac_id1,session1b),{'msg':'test2'})
+        r = self.call_gw('/notify/user/{0}/session/{1}'.format(user_id4,session1b),{'msg':'test2'})
         c.put_record(StreamName=self.props['EVENT_STREAM'],
                      Data=json.dumps({'accountId':ac_id1,
                                       'sessionId':session1b,
                                       'msg':'test2-k'}),
                      PartitionKey=str(ac_id1))
         # msg to session2a
-        r = self.call_gw('/notify/{0}/user/{1}'.format(ac_id2,user_id1),{'msg':'test3'})
+        r = self.call_gw('/notify/user/{1}'.format(ac_id2,user_id1),{'msg':'test3'})
         c.put_record(StreamName=self.props['EVENT_STREAM'],
                      Data=json.dumps({'accountId':ac_id2,
                                       'userId':user_id1,
@@ -133,11 +135,7 @@ class TestSessions(unittest.TestCase):
         msgs_1b = self.get_msgs(s1b)
         msgs_2a = self.get_msgs(s2a)
         msgs_2b = self.get_msgs(s2b)
-        pprint.pprint(msgs_1a)
-        pprint.pprint(msgs_1b)
-        pprint.pprint(msgs_2a)
-        pprint.pprint(msgs_2b)
-                
+
         self.assertListEqual(msgs_1a,['test1','test1-k'])
         self.assertListEqual(msgs_1b,['test1','test1-k','test2','test2-k'])
         self.assertListEqual(msgs_2a,['test3','test3-k'])
@@ -148,21 +146,31 @@ class TestSessions(unittest.TestCase):
         ac_id1 = random.randint(10000000,50000000)
         session1a = str(uuid.uuid1())
         user_id1 = random.randint(80000001,90000000)
-        s = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a),{'userId':user_id1})['session']
-        r = self.call_gw('/notify/{0}/user/{1}'.format(ac_id1,user_id1),{'msg':'test9'})
+        s = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id1,session1a))['session']
+        r = self.call_gw('/notify/user/{0}'.format(user_id1),{'msg':'test9'})
         time.sleep(5)
         msgs = self.get_msgs(s)
         self.assertListEqual(msgs,['test9'])
-
+        
+    def test_broadcast(self):
+        ac_id1 = random.randint(10000000,50000000)
+        session1a = str(uuid.uuid1())
+        user_id1 = random.randint(80000001,90000000)
+        s = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id1,session1a))['session']
+        r = self.call_gw('/notify',{'msg':'test12'})
+        time.sleep(5)
+        msgs = self.get_msgs(s)
+        self.assertListEqual(msgs,['test12'])
         
     def test_renew(self):
         ac_id1 = random.randint(10000000,50000000)
         session1a = str(uuid.uuid1())
-        r = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a))
+        user_id = random.randint(0,10000000)
+        r = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id,session1a))
         self.assertTrue(r['success'])
-        r = self.call_gw('/notify/{0}'.format(ac_id1),{'msg':'test5'})
+        r = self.call_gw('/notify/account/{0}'.format(ac_id1),{'msg':'test5'})
         # renew session
-        r = self.call_gw('/renew/{0}/{1}'.format(ac_id1,session1a))
+        r = self.call_gw('/renew/{0}/{1}/{2}'.format(ac_id1,user_id,session1a))
         s1a = r['session']
         self.check_session(s1a)
         time.sleep(5)
@@ -172,12 +180,13 @@ class TestSessions(unittest.TestCase):
     def test_double_create(self):
         ac_id1 = random.randint(10000000,50000000)
         session1a = str(uuid.uuid1())
-        r = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a))
+        user_id = random.randint(0,10000000)
+        r = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id,session1a))
         self.assertTrue(r['success'])
-        r = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a))
+        r = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id,session1a))
         self.assertTrue(r['success'])
         s1a = r['session']
-        r = self.call_gw('/notify/{0}'.format(ac_id1),{'msg':'test6'})
+        r = self.call_gw('/notify/account/{0}'.format(ac_id1),{'msg':'test6'})
         time.sleep(5)
         msgs_1a = self.get_msgs(s1a)
         self.assertListEqual(msgs_1a,['test6'])
@@ -185,12 +194,13 @@ class TestSessions(unittest.TestCase):
     def test_create_destroy(self):
         ac_id1 = random.randint(10000000,50000000)
         session1a = str(uuid.uuid1())
-        r = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a))
+        user_id = random.randint(0,10000000)
+        r = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id,session1a))
         self.assertTrue(r['success'])
         s1a = r['session']
-        r = self.call_gw('/destroy/{0}/{1}'.format(ac_id1,session1a))
+        r = self.call_gw('/destroy/{0}/{1}/{2}'.format(ac_id1,user_id,session1a))
         self.assertTrue(r['success'])
-        r = self.call_gw('/notify/{0}'.format(ac_id1),{'msg':'test6'})
+        r = self.call_gw('/notify/account/{0}'.format(ac_id1),{'msg':'test6'})
         time.sleep(5)
         with self.assertRaises(Exception):
             get_msgs(s1a)
@@ -198,19 +208,20 @@ class TestSessions(unittest.TestCase):
     def test_cleanup(self):
         ac_id1 = random.randint(10000000,50000000)
         session1a = str(uuid.uuid1())
-        r = self.call_gw('/create/{0}/{1}'.format(ac_id1,session1a))
+        user_id = random.randint(0,10000000)
+        r = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id,session1a))
         self.assertTrue(r['success'])
         s1a = r['session']
         # modify expiration date so 5 days in past
         dynamodb = boto3.resource('dynamodb')
         t = dynamodb.Table(self.props['SESSION_TABLE'])
-        item = t.get_item(Key={'accountId':ac_id1,
+        item = t.get_item(Key={'userId':user_id,
                                'sessionId':session1a})['Item']
         item['expires'] = int(time.time()-86400*5)
         t.put_item(Item=item)
         # now clean, should be removed along with it's SQS url
         self.call_gw('/cleanup')
-        r = t.get_item(Key={'accountId':ac_id1,
+        r = t.get_item(Key={'userId':user_id,
                             'sessionId':session1a})
         self.assertNotIn('Item',r)
         sqs_c = boto3.client('sqs')

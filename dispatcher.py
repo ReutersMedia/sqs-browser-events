@@ -29,25 +29,26 @@ def send_to_sqs(r, sqs_url, aes_key):
     ctr = pyaes.Counter(initial_value=init_ctr)
     aes = pyaes.AESModeOfOperationCTR(aes_key,counter=ctr)
     m = str(init_ctr)+'|'+base64.b64encode(aes.encrypt(json.dumps(r)))
-    c.send_message(QueueUrl=sqs_url,
-                   MessageBody=m)
+    try:
+        c.send_message(QueueUrl=sqs_url,
+                       MessageBody=m)
+    except:
+        LOGGER.error("Unable to send to queue {0}".format(sqs_url))
+        # ignore and continue, may be expired queue
     return sqs_url
 
-def parse_account_id(path_p):
+def parse_id(path_p,field):
     try:
-        if 'account_id' in path_p:
-            return int(path_p['account_id'])
-        else:
-            return int(path_p['accountId'])
+        return int(path_p[field])
     except:
-        LOGGER.exception("must provide an integer account ID")
-        raise DispatcherException("Invalid accountId, must be integer")
+        return None
     
 def dispatch(m):
     # look up queues
-    queues = dynamo_sessions.lookup(parse_account_id(m),
-                                    session_id=m.get('sessionId',m.get('session_id')),
-                                    user_id=m.get('userId',m.get('user_id')))
+    # only dispatch to ones that have been active in last 24 hours
+    queues = dynamo_sessions.lookup(account_id=parse_id(m,'accountId'),
+                                    session_id=m.get('sessionId'),
+                                    user_id=parse_id(m,'userId'))
     # unique initialization vector for AES
     LOGGER.info("Dispatching message to {0} queues".format(len(queues)))
     return [send_to_sqs(m,x['sqsUrl'],base64.b64decode(x['aesKey'])) for x in queues]
@@ -96,7 +97,8 @@ def api_gateway_handler(event, context):
         qsp = {}
     try:
         msg = qsp.copy()
-        msg.update(path_p)
+        if path_p is not None:
+            msg.update(path_p)
         r = dispatch(msg)
         return gen_json_resp({'success':True,
                               'sqsUrls':r})

@@ -38,12 +38,12 @@ def get_identity_pool():
         LOGGER.info("found IdentityPoolId {0}".format(_identity_pool_id))
     return _identity_pool_id
 
-def parse_account_id(path_p):
+def parse_id(path_p,field):
     try:
-        return int(path_p['account_id'])
+        return int(path_p[field])
     except:
-        LOGGER.exception("must provide an integer account ID")
-        raise SessionManagerException("Invalid accountId, must be integer")
+        LOGGER.exception("must provide an integer {0}".format(field))
+        raise SessionManagerException("Invalid {0}, must be integer".format(field))
 
 def get_credentials(cog_client, cog_id):
     r = cog_client.get_credentials_for_identity(IdentityId=cog_id)
@@ -52,9 +52,9 @@ def get_credentials(cog_client, cog_id):
             'sessionToken': r['Credentials']['SessionToken'],
             'expires': int(time.mktime(r['Credentials']['Expiration'].utctimetuple()))}
     
-def create_sqs_queue(account_id, session_id, user_id=None, restrict_ip=None):
+def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None):
     # first lookup to see if we already have for this session
-    d = dynamo_sessions.lookup(account_id, session_id=session_id)
+    d = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id)
     if len(d)>= 1:
         LOGGER.info("Session {0} already exists, reusing".format(session_id))
         return d[0]
@@ -103,27 +103,26 @@ def create_sqs_queue(account_id, session_id, user_id=None, restrict_ip=None):
     # create an encryption key
     
     m = {'accountId':account_id,
+         'userId':user_id,
          'sessionId':session_id,
          'sqsUrl':queue_url,
          'sqsQueueName':queue_name,
          'identityId':cog_id,
          'aesKey':base64.b64encode(aes_key)}
     m.update(cred_d)
-    if user_id is not None:
-        m['userId'] = user_id
     dynamo_sessions.create(m)
     return m
 
 
-def destroy_session(account_id, session_id):
-    d = dynamo_sessions.lookup(account_id, session_id=session_id)
+def destroy_session(account_id, user_id, session_id):
+    d = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id)
     if len(d)>0:
         sqs_url = d[0]['sqsUrl']
         c = boto3.client('sqs')
         c.delete_queue(QueueUrl=sqs_url)
         LOGGER.info("Removed queue {0}".format(sqs_url))
-        LOGGER.info("Destroying session {0}, account {1}".format(session_id,account_id))
-        dynamo_sessions.destroy(account_id, session_id)
+        LOGGER.info("Destroying session {0}, user {1}".format(session_id,user_id))
+        dynamo_sessions.destroy(user_id, session_id)
         return {"success":True}
     else:
         return {"success":False,
@@ -134,10 +133,10 @@ def get_all_sessions():
             "sessions": dynamo_sessions.get_all_sessions()}
 
 
-def get_session_status(account_id, session_id):
+def get_session_status(account_id, user_id, session_id):
     if session_id is None:
         raise SessionManagerException("Destroy action must include a sessionId")
-    d = dynamo_sessions.lookup(account_id, session_id=session_id)
+    d = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id)
     if len(d)>0:
         return {"success":True,
                 "session":d[0]}
@@ -146,8 +145,8 @@ def get_session_status(account_id, session_id):
                 "session":None}
     
 
-def renew_session(account_id, session_id):
-    m = dynamo_sessions.lookup(account_id,session_id=session_id)
+def renew_session(account_id, user_id, session_id):
+    m = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id)
     if len(m)==0:
         return {"success":False,
                 "message":"Session has expired"}
@@ -161,15 +160,10 @@ def renew_session(account_id, session_id):
             "session":m}
     
     
-def create_session(account_id, session_id, user_id=None, restrict_ip=None):
+def create_session(account_id, user_id, session_id, restrict_ip=None):
     if len(session_id)>256:
         raise SessionManagerException("sessionId can not be longer than 256 characters")
-    if user_id is not None:
-        try:
-            user_id = int(user_id)
-        except:
-            raise SessionManagerException("Invalid userId: {0!r}".format(user_id))
-    m = create_sqs_queue(account_id, session_id, user_id, restrict_ip=restrict_ip)
+    m = create_sqs_queue(account_id, user_id, session_id, restrict_ip=restrict_ip)
     LOGGER.info("created session for account_id={0}, session_id={1}, user_id={2}".format(account_id,session_id,user_id))
     return {"success":True,
             "session":m}
@@ -184,7 +178,10 @@ def cleanup_sessions():
 SQS_NAME_CHARS = [ chr(x) for x in range(97,123)+range(65,91)+range(48,58) ] + ['-','_']
 
 def cleanup_queues():
-    prefix = os.getenv('SQS_NAME_PREFIX')
+    prefix = os.getenv('SQS_QUEUE_PREFIX')
+    if len(prefix)==0:
+        LOGGER.error("Queue name prefix missing, refusing to delete")
+        return
     db_queues = dynamo_sessions.get_all_sqs_urls()
     # SQS list_queues is limited to 1000, so may need to split up the queries.
     # we only need to split up if db_queues is very long.
@@ -233,22 +230,27 @@ def gen_json_resp(d, code='200'):
 def api_gateway_handler(event, context):
     LOGGER.debug("Received event: {0!r}".format(event))
     path_p = event.get('pathParameters')
-    qsp = event.get('queryStringParameters')
-    if qsp is None:
-        qsp = {}
     try:
         res = event['resource']
         if res.startswith('/create'):
-            r = create_session(parse_account_id(path_p),path_p['session_id'],user_id=qsp.get('userId'))
+            r = create_session(parse_id(path_p,'accountId'),
+                               parse_id(path_p,'userId'),
+                               path_p['sessionId'])
         elif res.startswith('/destroy'):
-            r = destroy_session(parse_account_id(path_p),path_p['session_id'])
+            r = destroy_session(parse_id(path_p,'accountId'),
+                                parse_id(path_p,'userId'),
+                                path_p['sessionId'])
         elif res.startswith('/renew'):
-            r = renew_session(parse_account_id(path_p),path_p['session_id'])
+            r = renew_session(parse_id(path_p,'accountId'),
+                              parse_id(path_p,'userId'),
+                              path_p['sessionId'])
         elif res.startswith('/status'):
             if path_p is None:
                 r = get_all_sessions()
             else:
-                r = get_session_status(parse_account_id(path_p),path_p['session_id'])
+                r = get_session_status(parse_id(path_p,'accountId'),
+                                       parse_id(path_p,'userId'),
+                                       parse_p['sessionId'])
         elif res.startswith('/cleanup'):
             return {'sessions_removed':cleanup_sessions(),
                     'queues_removed':cleanup_queues(),

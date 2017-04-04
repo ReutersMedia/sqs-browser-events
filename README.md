@@ -125,13 +125,13 @@ Typically you will `create` a session when a user logs in, generating a session 
 
 ## Dispatching Messages
 
-Messages can be dispatched via Kinesis by posting JSON objects to the stream.  The entire JSON object is passed, and three fields are used for routing to the SQS queues by filtering against values set during session creation:
+Messages can be dispatched via Kinesis by posting JSON objects to the stream.  The Kinesis stream name is [ENV]-sqs-browser-event-dispatcher.  The entire JSON object is passed, and three fields are used for routing to the SQS queues by filtering against values set during session creation:
 
-* `accountId`: required, must be an integer
+* `accountId`: optional, must be an integer
 * `sessionId`: optional, must be a string
 * `userId`: optional, must be an integer
 
-Messages can also be submitted via an API Gateway.  
+If none of the above keys are present, the message will be dispatched to ALL users.  Messages can also be submitted via an API Gateway.  
 
 * `/notify/[accountId]`
 * `/notify/[accountId]/session/[sessionId]`

@@ -23,7 +23,8 @@ provider:
         - dynamodb:UpdateItem
         - dynamodb:DeleteItem
         - dynamodb:GetRecords
-      Resource: "arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.sessionTable}"
+      Resource:
+        - "arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.sessionTable}*"
     - Effect: Allow
       Action:
         - logs:CreateLogGroup
@@ -51,8 +52,11 @@ provider:
       Resource: "*"
   environment:
     SESSION_TABLE: ${self:custom.sessionTable}
+    SESSION_TABLE_ACCOUNT_GSI: ${self:custom.sessionTable}-gsi-account
     COGNITO_IDENTITY_POOL: ${opt:poolname, self:provider.defPoolName}
     SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
+    SESSION_INACTIVE_PURGE_SEC: 86400
+    HISTORY_TABLE: ${self:custom.historyTable}
   include:
     - lib/**
 custom:
@@ -60,6 +64,7 @@ custom:
   region: ${opt:region}
   sessionTable: ${opt:env}-sqs-browser-sessions
   browserEventStream: ${opt:env}-sqs-browser-event-stream
+  historyTable: ${opt:env}-sqs-browser-history
 functions:
   SessionManagerCleanup:
     handler: session_manager.cleanup_lambda_handler
@@ -79,16 +84,16 @@ functions:
     events:
       - http:
           method: get
-          path: /create/{account_id}/{session_id}
+          path: /create/{accountId}/{userId}/{sessionId}
       - http:
           method: get
-          path: /destroy/{account_id}/{session_id}
+          path: /destroy/{accountId}/{userId}/{sessionId}
       - http:
           method: get
-          path: /renew/{account_id}/{session_id}
+          path: /renew/{accountId}/{userId}/{sessionId}
       - http:
           method: get
-          path: /status/{account_id}/{session_id}
+          path: /status/{accountId}/{userId}/{sessionId}
       - http:
           method: get
           path: /status
@@ -117,25 +122,28 @@ functions:
     events:
       - http:
           method: get
-          path: /notify/{account_id}
+          path: /notify
       - http:
           method: get
-          path: /notify/{account_id}/session/{session_id}
+          path: /notify/account/{accountId}
       - http:
           method: get
-          path: /notify/{account_id}/user/{user_id}
+          path: /notify/user/{userId}/session/{sessionId}
+      - http:
+          method: get
+          path: /notify/user/{userId}
 resources:
   Resources:
-    ApiGatewayMethodCreateAccountidVarSessionidVarGet:
+    ApiGatewayMethodCreateAccountidVarUseridVarSessionidVarGet:
       Properties:
         AuthorizationType: AWS_IAM
-    ApiGatewayMethodDestroyAccountidVarSessionidVarGet:
+    ApiGatewayMethodDestroyAccountidVarUseridVarSessionidVarGet:
       Properties:
         AuthorizationType: AWS_IAM
-    ApiGatewayMethodRenewAccountidVarSessionidVarGet:
+    ApiGatewayMethodRenewAccountidVarUseridVarSessionidVarGet:
       Properties:
         AuthorizationType: AWS_IAM
-    ApiGatewayMethodStatusAccountidVarSessionidVarGet:
+    ApiGatewayMethodStatusAccountidVarUseridVarSessionidVarGet:
       Properties:
         AuthorizationType: AWS_IAM
     ApiGatewayMethodStatusGet:
@@ -144,13 +152,16 @@ resources:
     ApiGatewayMethodCleanupGet:
       Properties:
         AuthorizationType: AWS_IAM
-    ApiGatewayMethodNotifyAccountidVarGet:
+    ApiGatewayMethodNotifyGet:
       Properties:
         AuthorizationType: AWS_IAM
-    ApiGatewayMethodNotifyAccountidVarSessionSessionidVarGet:
+    ApiGatewayMethodNotifyAccountAccountidVarGet:
       Properties:
         AuthorizationType: AWS_IAM
-    ApiGatewayMethodNotifyAccountidVarUserUseridVarGet:
+    ApiGatewayMethodNotifyUserUseridVarSessionSessionidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodNotifyUserUseridVarGet:
       Properties:
         AuthorizationType: AWS_IAM
     browserEventStream:
@@ -158,6 +169,23 @@ resources:
       Properties:
         Name: ${self:custom.browserEventStream}
         ShardCount: 1
+    noticeHistoryTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.historyTable}
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: N
+          - AttributeName: created
+            AttributeType: N
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: created
+            KeyType: RANGE
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5        
     sessionTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -167,11 +195,23 @@ resources:
             AttributeType: N
           - AttributeName: sessionId
             AttributeType: S
+          - AttributeName: userId
+            AttributeType: N
         KeySchema:
-          - AttributeName: accountId
+          - AttributeName: userId
             KeyType: HASH
           - AttributeName: sessionId
             KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: ${self:custom.sessionTable}-gsi-account
+            KeySchema:
+              - AttributeName: accountId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+            ProvisionedThroughput:
+              ReadCapacityUnits: 5
+              WriteCapacityUnits: 5
         ProvisionedThroughput:
           ReadCapacityUnits: 5
           WriteCapacityUnits: 5
