@@ -18,6 +18,7 @@ Your backend application should generally create the session for the user and sh
 
  [Browser]
     sqs - long-poll for new messages
+    /user-messages - retrieving history of messages for a user
 
  [Message Generator]
     /notify
@@ -97,7 +98,7 @@ And embed the following inline policy, which allows access to all queues with th
 
 ## Session Manager API
 
-In the API calls below, the accountId must be an integer, and sessionId must be a string with length less than 256 characters.  For the create, renew, and status endpoints, the response will contain session descriptions of the form given below.  The expiration time is for the access key and will be several hours in the future.  These access keys can be renewed periodically by calling the `renew` endpoint.
+In the API calls below, the accountId must be an integer, and sessionId must be a string with length less than 256 characters.  For the create, renew, and status endpoints, the response will contain session descriptions of the form given below.  The expiration time is for the access key and will be several hours in the future.  These access keys can be renewed periodically by calling the `renew` endpoint.  The session manager API requires IAM authentication.
 
 ```
    {
@@ -131,17 +132,18 @@ Messages can be dispatched via Kinesis by posting JSON objects to the stream.  T
 * `sessionId`: optional, must be a string
 * `userId`: optional, must be an integer
 
-If none of the above keys are present, the message will be dispatched to ALL users.  Messages can also be submitted via an API Gateway.  
+If none of the above keys are present, the message will be dispatched to ALL users.  Messages can also be submitted via an API Gateway, which requires IAM authentication.  
 
-* `/notify/[accountId]`
-* `/notify/[accountId]/session/[sessionId]`
-* `/notify/[accountId]/user/[userId]`
+* `/notify`: Post message to all queues
+* `/notify/[accountId]`: Post message to all users associated with the account
+* `/notify/[accountId]/user/[userId]`: Post to all sessions for a user
+* `/notify/[accountId]/user/[userId]/session/[sessionId]`: Post to a specific session for a user
 
 Each of these accepts query string parameters, and are used to construct the message.  For example:
 
 `/notify/12345?msg=Hello+World`
 
-Will send the folling JSON to every queue associated with the given account ID:
+Will send the folling JSON to every queue associated with the given account ID.
 
 ```
    {
@@ -149,6 +151,13 @@ Will send the folling JSON to every queue associated with the given account ID:
       "msg": "Hello World"
    }
 ```
+
+## Requesting and Receipting User Messages
+
+In some cases it is useful to retrieve the message history for a user, for example when they are logging after being absent for some time.  Messages will accumulate depending on the SESSION_INACTIVE_PURGE_SEC parameter set in serverless, by default 7 days.  When messages are dispatched, a list of unique userIDs receiving the message is compiled, and those messages are put into a notification history table in DynamoDB.  If a user has several active sessions, the message is inserted for that userId only once.  A user's messages can be retrieved and read-receipted using an API Gateway authenticated by IAM.  
+
+* `/messages/user/[userId]`: retrieve messages for a user, optionally accepting a `start` and/or and `end` parameter in epoch seconds.  If a message has been read-receipted, an `is_read` parameter will be present and equal to 1, otherwise it will be present and equal to 0.
+* `/messages/set-read/user/[userId]/message/[messageId]`: set a message as read.  this updates the 'is_read' parameter to 1 from its initial value of 0.
 
 
 ## Deploying

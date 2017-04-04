@@ -21,23 +21,6 @@ import base64
 import pyaes
 
 
-def clean_entry(e):
-    if e is None:
-        return e
-    d = {}
-    for k,v in e.iteritems():
-        if "N" in v:
-            x = decimal.Decimal(v['N'])
-            if x % 1 == 0:
-                x = int(x)
-            else:
-                x = float(x)
-        elif "S" in v:
-            x = v['S']
-        else:
-            x = v
-        d[k] = x
-    return d
 
 
 class TestSessions(unittest.TestCase):

@@ -5,6 +5,7 @@ import sys
 import base64
 import json
 import concurrent.futures
+import threading
 
 import boto3
 
@@ -45,6 +46,11 @@ def parse_id(path_p,field):
         return int(path_p[field])
     except:
         return None
+
+def add_to_user_history(users,m):
+    m = m.copy()
+    m['is_read'] = 0
+    dynamo_sessions.batch_add_user_history(users,m,n_workers=10)
     
 def dispatch(m):
     # look up queues
@@ -52,8 +58,13 @@ def dispatch(m):
     queues = dynamo_sessions.lookup(account_id=parse_id(m,'accountId'),
                                     session_id=m.get('sessionId'),
                                     user_id=parse_id(m,'userId'))
-    # unique initialization vector for AES
     LOGGER.info("Dispatching message to {0} queues".format(len(queues)))
+
+    # build unique list of users, for alert history table
+    user_set = list(set([x['userId'] for x in queues]))
+    user_hist_th = threading.Thread(target=add_to_user_history,args=(user_set,m))
+    user_hist_th.start()
+                                    
     sqs_urls = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         future_to_sqsurl = {executor.submit(send_to_sqs, m, q): q for q in queues}
@@ -62,6 +73,7 @@ def dispatch(m):
             success = future.result()
             if success:
                 sqs_urls.append(sqs_url)
+    user_hist_th.join()
     return sqs_urls
         
 
@@ -90,14 +102,6 @@ def lambda_handler(event, context):
     recs.sort(cmp=lambda x,y: cmp(k_seq(x),k_seq(y)))
     [proc_rec(x) for x in recs]
 
-    
-def gen_json_resp(d,code='200'):
-    return {'statusCode': code,
-            'body': json.dumps(d,cls=common.DecimalEncoder),
-            'headers': {
-                'Content-Type': 'application/json'
-                }
-        }
 
 
 def api_gateway_handler(event, context):
@@ -111,10 +115,10 @@ def api_gateway_handler(event, context):
         if path_p is not None:
             msg.update(path_p)
         r = dispatch(msg)
-        return gen_json_resp({'success':True,
+        return common.gen_json_resp({'success':True,
                               'sqsUrls':r})
     except:
         LOGGER.exception("Unable to handle request")
-        return gen_json_resp({'success':False,
+        return common.gen_json_resp({'success':False,
                               'message':'error handling request'},
                              code='500')

@@ -23,8 +23,10 @@ provider:
         - dynamodb:UpdateItem
         - dynamodb:DeleteItem
         - dynamodb:GetRecords
+        - dynamodb:BatchWriteItem
       Resource:
         - "arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.sessionTable}*"
+        - "arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.historyTable}*"
     - Effect: Allow
       Action:
         - logs:CreateLogGroup
@@ -55,7 +57,7 @@ provider:
     SESSION_TABLE_ACCOUNT_GSI: ${self:custom.sessionTable}-gsi-account
     COGNITO_IDENTITY_POOL: ${opt:poolname, self:provider.defPoolName}
     SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
-    SESSION_INACTIVE_PURGE_SEC: 86400
+    SESSION_INACTIVE_PURGE_SEC: 604800
     HISTORY_TABLE: ${self:custom.historyTable}
   include:
     - lib/**
@@ -64,7 +66,7 @@ custom:
   region: ${opt:region}
   sessionTable: ${opt:env}-sqs-browser-sessions
   browserEventStream: ${opt:env}-sqs-browser-event-stream
-  historyTable: ${opt:env}-sqs-browser-history
+  historyTable: ${opt:env}-sqs-browser-messages
 functions:
   SessionManagerCleanup:
     handler: session_manager.cleanup_lambda_handler
@@ -104,7 +106,7 @@ functions:
     handler: dispatcher.lambda_handler
     name: ${opt:env}-sqs-browser-event-dispatcher
     memorySize: 512
-    timeout: 55
+    timeout: 300
     description: dispatch user messsages, invoke directly or via Kinesis stream, version ${self:custom.version}  
     events:
       - stream:
@@ -113,11 +115,24 @@ functions:
             Fn::GetAtt:
               - browserEventStream
               - Arn
+  UserMessageAPI:
+    handler: user_message_api.api_gateway_handler
+    name: ${opt:env}-sqs-browser-user-messages
+    memorySize: 512
+    timeout: 60
+    description: respond to queries about user messages, version ${self:custom.version}
+    events:
+      - http:
+          method: get
+          path: /messages/user/{userId}
+      - http:
+          method: get
+          path: /messages/set-read/user/{userId}/message/{messageId}
   DispatcherAPI:
     handler: dispatcher.api_gateway_handler
     name: ${opt:env}-sqs-browser-dispatcher-api
     memorySize: 512
-    timeout: 55
+    timeout: 300
     description: dispatch user messsages, version ${self:custom.version}
     events:
       - http:
@@ -135,6 +150,9 @@ functions:
 resources:
   Resources:
     ApiGatewayMethodCreateAccountidVarUseridVarSessionidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
+    ApiGatewayMethodMessagesUserUseridVarGet:
       Properties:
         AuthorizationType: AWS_IAM
     ApiGatewayMethodDestroyAccountidVarUseridVarSessionidVarGet:
@@ -164,6 +182,9 @@ resources:
     ApiGatewayMethodNotifyUserUseridVarGet:
       Properties:
         AuthorizationType: AWS_IAM
+    ApiGatewayMethodMessagesSetDashreadUserUseridVarMessageMessageidVarGet:
+      Properties:
+        AuthorizationType: AWS_IAM
     browserEventStream:
       Type: AWS::Kinesis::Stream
       Properties:
@@ -176,12 +197,12 @@ resources:
         AttributeDefinitions:
           - AttributeName: userId
             AttributeType: N
-          - AttributeName: created
-            AttributeType: N
+          - AttributeName: messageId
+            AttributeType: S
         KeySchema:
           - AttributeName: userId
             KeyType: HASH
-          - AttributeName: created
+          - AttributeName: messageId
             KeyType: RANGE
         ProvisionedThroughput:
           ReadCapacityUnits: 5

@@ -122,7 +122,7 @@ def destroy_session(account_id, user_id, session_id):
         c.delete_queue(QueueUrl=sqs_url)
         LOGGER.info("Removed queue {0}".format(sqs_url))
         LOGGER.info("Destroying session {0}, user {1}".format(session_id,user_id))
-        dynamo_sessions.destroy(user_id, session_id)
+        dynamo_sessions.destroy(account_id, user_id, session_id)
         return {"success":True}
     else:
         return {"success":False,
