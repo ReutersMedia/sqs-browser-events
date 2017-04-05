@@ -6,6 +6,7 @@ provider:
   stage: ${opt:env}
   defPoolName: "sqs_browser"
   defVersion: "0.0.0"
+  defCognitoRegion: ""
   cfLogs: true
   region: ${opt:region}
   stackTags:
@@ -53,6 +54,7 @@ provider:
         - sqs:*
       Resource: "*"
   environment:
+    COGNITO_REGION: ${opt:cognito-region, self:provider.defCognitoRegion}
     SESSION_TABLE: ${self:custom.sessionTable}
     SESSION_TABLE_ACCOUNT_GSI: ${self:custom.sessionTable}-gsi-account
     COGNITO_IDENTITY_POOL: ${opt:poolname, self:provider.defPoolName}

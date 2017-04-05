@@ -27,7 +27,11 @@ _identity_pool_id = None
 def get_identity_pool():
     global _identity_pool_id
     if _identity_pool_id==None:
-        c = boto3.client('cognito-identity')
+        cog_region = os.getenv('COGNITO_REGION')
+        if cog_region is not None and len(cog_region)>0:
+            c = boto3.client('cognito-identity',region_name=cog_region)
+        else:
+            c = boto3.client('cognito-identity')
         pools = c.list_identity_pools(MaxResults=60)['IdentityPools']
         pool_name = os.getenv('COGNITO_IDENTITY_POOL')
         try:
