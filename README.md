@@ -98,7 +98,7 @@ And embed the following inline policy, which allows access to all queues with th
 
 ## Session Manager API
 
-In the API calls below, the accountId must be an integer, and sessionId must be a string with length less than 256 characters.  For the create, renew, and status endpoints, the response will contain session descriptions of the form given below.  The expiration time is for the access key and will be several hours in the future.  These access keys can be renewed periodically by calling the `renew` endpoint.  The session manager API requires IAM authentication.
+In the API calls below, the accountId must be an integer, and sessionId must be a string with length less than 256 characters.  For the create, renew, and status endpoints, the response will contain session descriptions of the form given below.  The expiration time is for the access key and will be several hours in the future.  These access keys can be renewed periodically by calling the `renew` endpoint.  The session manager API requires IAM authentication.  The AES key will be base-64 encoded.
 
 ```
    {
@@ -108,8 +108,10 @@ In the API calls below, the accountId must be an integer, and sessionId must be 
       "expires": 1490867032,
       "identityId": "eu-west-1:bfb4c749-4c0e-446a-892e-defd9b01bed0",
       "secretKey": "XXXX",
+      "sessionToken": "XXXXX",
       "sessionId": "abc",
-      "accountId": 2
+      "accountId": 2,
+      "aesKey": "xxxxxxx"
    }
 ```
 
