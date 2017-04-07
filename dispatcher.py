@@ -28,7 +28,8 @@ class DispatcherException(Exception):
 def send_to_sqs(r, q):
     sqs_url = q['sqsUrl']
     aes_key = base64.b64decode(q['aesKey'])
-    c = boto3.client('sqs')
+    session = boto3.session.Session()
+    c = session.client('sqs')
     init_ctr = random.randint(0,9999999999) # OK if crappy python pseudo-random, only to prevent dupe blocks
     ctr = pyaes.Counter(initial_value=init_ctr)
     aes = pyaes.AESModeOfOperationCTR(aes_key,counter=ctr)

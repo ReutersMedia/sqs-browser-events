@@ -52,7 +52,8 @@ def write_user_history(user_batch,msg,tnow):
     # items are inserted multiple times
     tnow_dec = quantize_tstamp(decimal.Decimal(tnow))
     try:
-        c = boto3.client('dynamodb')
+        session = boto3.session.Session()
+        c = session.client('dynamodb')
         ts = TypeSerializer()
         def build_item(user_id):
             # hash of message and timestamp
