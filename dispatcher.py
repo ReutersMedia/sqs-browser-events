@@ -33,7 +33,7 @@ def send_to_sqs(r, q):
     init_ctr = random.randint(0,9999999999) # OK if crappy python pseudo-random, only to prevent dupe blocks
     ctr = pyaes.Counter(initial_value=init_ctr)
     aes = pyaes.AESModeOfOperationCTR(aes_key,counter=ctr)
-    m = str(init_ctr)+'|'+base64.b64encode(aes.encrypt(json.dumps(r)))
+    m = str(init_ctr)+'|'+base64.b64encode(aes.encrypt(json.dumps(r,cls=common.DecimalEncoder)))
     try:
         c.send_message(QueueUrl=sqs_url,
                        MessageBody=m)
