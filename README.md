@@ -178,3 +178,7 @@ You can also specify a Cognito pool name, and a version tag:
 # serverless deploy --env prod --region eu-west-1 --poolname my-cognito-pool --version 1.0.5
 ```
 
+
+## Credits
+
+Thanks to Dan Heidebrecht for original idea.
