@@ -94,6 +94,7 @@ def batch_add_user_history(users,msg,n_workers=10):
         if len(failures)>0:
             time.sleep(try_cnt*5)
         users = failures
+    LOGGER.info("Done adding to user history")
 
 def get_user_messages(user_id,start_t=None,end_t=None):
     q = {'KeyConditionExpression': Key('userId').eq(user_id)}

@@ -61,6 +61,8 @@ provider:
     SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
     SESSION_INACTIVE_PURGE_SEC: 604800
     HISTORY_TABLE: ${self:custom.historyTable}
+    SQS_SENDER_LAMBDA: ${opt:env}-sqs-browser-sender
+    SQS_SENDER_BATCH_SIZE: 50
   include:
     - lib/**
 custom:
@@ -104,10 +106,16 @@ functions:
       - http:
           method: get
           path: /cleanup
+  SQSSender:
+    handler: sqs_sender.lambda_handler
+    name: ${opt:env}-sqs-browser-sender
+    memorySize: 128
+    timeout: 300
+    description: send a batch of messages to SQS queues
   EventDispatcher:
     handler: dispatcher.lambda_handler
     name: ${opt:env}-sqs-browser-event-dispatcher
-    memorySize: 1024
+    memorySize: 512
     timeout: 300
     description: dispatch user messsages, invoke directly or via Kinesis stream, version ${self:custom.version}  
     events:

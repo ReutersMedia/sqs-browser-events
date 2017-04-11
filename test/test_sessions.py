@@ -206,6 +206,7 @@ class TestSessions(unittest.TestCase):
         self.call_gw('/cleanup')
         r = t.get_item(Key={'userId':user_id,
                             'sessionId':session1a})
+        time.sleep(10)
         self.assertNotIn('Item',r)
         sqs_c = boto3.client('sqs')
         queues = sqs_c.list_queues(QueueNamePrefix=item['sqsQueueName'])

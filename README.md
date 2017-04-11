@@ -3,6 +3,8 @@
 
 One challenge with serverless architectures is supporting event-driven browser experiences.  This package provides a solution by using AWS SQS and Lambda functions, and Cognito for creating temporary unauthorized sessions.  Typical use would be a backend system that creates a new session upon login, and passes an SQS Queue URL and a pair of AWS auth keys to the browser, and the browser then polls SQS for events.  A dispatcher API and Kinesis input stream is used to generate and dispatch events to the queues.
 
+To accomodate high-volume messaging, the dispatcher (EventDispatcher) is kept lightweight and does not send to the SQS queues.  It instead creates batches of messages and asynchronously invokes another Lambda that calls SQS (SQSSender).  The Lambda polling Kinesis is process-limited to the number of shards, but the SQSSender Lambda has no such constraint and can scale out.  To increase the number of EventDispatcher processes, increase the number of shards and partition intelligently.
+
 
 ## Principles
 
