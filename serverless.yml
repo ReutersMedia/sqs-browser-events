@@ -107,12 +107,13 @@ functions:
   EventDispatcher:
     handler: dispatcher.lambda_handler
     name: ${opt:env}-sqs-browser-event-dispatcher
-    memorySize: 512
+    memorySize: 1024
     timeout: 300
     description: dispatch user messsages, invoke directly or via Kinesis stream, version ${self:custom.version}  
     events:
       - stream:
           type: kinesis
+          batchSize: 1
           arn:
             Fn::GetAtt:
               - browserEventStream
