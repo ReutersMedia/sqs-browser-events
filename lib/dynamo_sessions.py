@@ -4,9 +4,6 @@ import decimal
 import concurrent.futures
 
 import boto3
-import hashlib
-import base64
-import json
 
 from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeSerializer
@@ -47,53 +44,59 @@ def set_message_read(user_id, msg_id):
             return False
         
 
-def write_user_history(user_batch,msg,tnow):
+def write_user_history(item_batch):
     # use a consistent timestamp (tnow) so that any reprocessing results in overwriting if
     # items are inserted multiple times
-    tnow_dec = quantize_tstamp(decimal.Decimal(tnow))
     try:
+        hist_table = os.getenv('HISTORY_TABLE')
         session = boto3.session.Session()
         c = session.client('dynamodb')
-        ts = TypeSerializer()
-        def build_item(user_id):
-            # hash of message and timestamp
-            item = msg.copy()
-            item['userId'] = user_id
-            item['messageId'] = base64.urlsafe_b64encode(hashlib.sha1(str(tnow)+repr(msg)).digest())
-            item['created'] = tnow_dec
-            item = common.floats_to_decimals(item)
-            item_dyn = dict([(k,ts.serialize(v)) for k,v in item.iteritems()])
-            return {'PutRequest':{'Item':item_dyn}}
-        items = { os.getenv('HISTORY_TABLE'): [ build_item(user_id) for user_id in user_batch ] }
-        r = c.batch_write_item(RequestItems=items)
+        r = c.batch_write_item(RequestItems={ hist_table: item_batch })
         unproc = r.get('UnprocessedItems')
-        if unproc is not None and len(unproc)>0:
-            failures = [x['PutRequest']['Item']['userId'] for x in unproc]
-            return failures
+        if unproc is not None and hist_table in unproc and len(unproc[hist_table])>0:
+            return unproc[hist_table]
         return []
     except:
         LOGGER.exception("Error inserting user batch")
         # assume all failed
-        return user_batch
+        return item_batch
+
+def convert_to_dyn_objects(user_msg_list,tnow):
+    tnow_dec = quantize_tstamp(decimal.Decimal(tnow))
+    ts = TypeSerializer()
+    def build_item(user_id,msg):
+        # hash of message and timestamp
+        item = msg.copy()
+        item['userId'] = user_id
+        item['created'] = tnow_dec
+        item = common.floats_to_decimals(item)
+        item_dyn = dict([(k,ts.serialize(v)) for k,v in item.iteritems()])
+        return {'PutRequest':{'Item':item_dyn}}
+    return [build_item(user_id,msg) for user_id,msg in user_msg_list]
     
-def batch_add_user_history(users,msg,n_workers=10):
+    
+def batch_add_user_history(user_msg_list,n_workers=25):
     try_cnt = 0
     tnow = time.time()
-    while len(users)>0 and try_cnt <= 5:
+    user_msg_list = convert_to_dyn_objects(user_msg_list,tnow)
+    failures = []
+    while len(user_msg_list)>0 and try_cnt <= 5:
         try_cnt += 1
-        failures = []
         # split into batches of 25
-        batches = [users[i:i+25] for i in xrange(0,len(users),25)]
+        failures = []
+        batches = [user_msg_list[i:i+25] for i in xrange(0,len(user_msg_list),25)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            future_to_userbatch = {executor.submit(write_user_history, b, msg, tnow): b for b in batches}
+            future_to_userbatch = {executor.submit(write_user_history, b): b for b in batches}
             for future in concurrent.futures.as_completed(future_to_userbatch):
                 user_batch = future_to_userbatch[future]
-                failed_users = future.result()
-                failures.extend(failed_users)
-                LOGGER.info("User batch write: {0} failures out of {1} total".format(len(failed_users),len(user_batch)))
+                failed_items = future.result()
+                failures.extend(failed_items)
+                LOGGER.debug("User batch write: {0} failures".format(len(failed_items)))
         if len(failures)>0:
             time.sleep(try_cnt*5)
-        users = failures
+        user_msg_list = failures
+    if len(failures)>0:
+        LOGGER.error("Failure sending user batch writes, dropped {0}".format(len(failures)))
     LOGGER.info("Done adding to user history")
 
 def get_user_messages(user_id,start_t=None,end_t=None):

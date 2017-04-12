@@ -17,10 +17,7 @@ import testenv
 import requests
 from requests_aws4auth import AWS4Auth
 
-import base64
-import pyaes
-
-
+from common import get_msgs
 
 
 class TestSessions(unittest.TestCase):
@@ -48,30 +45,6 @@ class TestSessions(unittest.TestCase):
         self.assertIn('accountId',s)
 
         
-    def get_msgs(self, session):
-        sqs_c = boto3.client('sqs',
-                             aws_access_key_id=session['accessKey'],
-                             aws_secret_access_key=session['secretKey'],
-                             aws_session_token=session['sessionToken'])
-        msgs = []
-        while True:
-            print("Checking queue {0}".format(session['sqsUrl']))
-            r = sqs_c.receive_message(QueueUrl=session['sqsUrl'],
-                                      MaxNumberOfMessages=10)            
-            if 'Messages' not in r:
-                break
-            for m in r['Messages']:
-                init_ctr,msg = m['Body'].split('|',1)
-                ctr = pyaes.Counter(initial_value=int(init_ctr))
-                aes = pyaes.AESModeOfOperationCTR(base64.b64decode(session['aesKey']),counter=ctr)
-                dec_m = aes.decrypt(base64.b64decode(msg))
-                print("   Found message: {0}".format(dec_m))
-                msgs.append(json.loads(dec_m))
-                sqs_c.delete_message(QueueUrl=session['sqsUrl'],
-                                     ReceiptHandle=m['ReceiptHandle'])
-        return sorted([x['msg'] for x in msgs])
-
-    
     def test_create_and_poll(self):
         ac_id1 = random.randint(10000000,50000000)
         ac_id2 = random.randint(50000001,80000000)
@@ -141,7 +114,7 @@ class TestSessions(unittest.TestCase):
         user_id1 = random.randint(80000001,90000000)
         s = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id1,session1a))['session']
         r = self.call_gw('/notify',{'msg':'test12'})
-        time.sleep(5)
+        time.sleep(30)
         msgs = self.get_msgs(s)
         self.assertListEqual(msgs,['test12'])
         
@@ -200,13 +173,12 @@ class TestSessions(unittest.TestCase):
         t = dynamodb.Table(self.props['SESSION_TABLE'])
         item = t.get_item(Key={'userId':user_id,
                                'sessionId':session1a})['Item']
-        item['expires'] = int(time.time()-86400*5)
-        t.put_item(Item=item)
+        item['expires'] = int(time.time()-86400*30)
         # now clean, should be removed along with it's SQS url
         self.call_gw('/cleanup')
+        time.sleep(2)
         r = t.get_item(Key={'userId':user_id,
                             'sessionId':session1a})
-        time.sleep(10)
         self.assertNotIn('Item',r)
         sqs_c = boto3.client('sqs')
         queues = sqs_c.list_queues(QueueNamePrefix=item['sqsQueueName'])

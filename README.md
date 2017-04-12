@@ -33,8 +33,9 @@ The Cognito credentials expire after serveral hours, and periodically need to be
 
 Note that messages may accumulate while a user is not active, if they return and the same Session ID is used.
 
+A message can optionally provide a `messageId` field, which will be used as part of the primary key in the DynamoDB table that stores user messages.  If one is not provided, a hash of the Kinesis eventID will be used for stream events, or a hash of the timestamp and the message in the case of events posted via the API Gateway.
 
-## Message Encryption
+## Message Encryption and Privacy
 
 All messages are encrypted with AES using the counter mode of operation.  You will need to base-64 decode the AES key returned by the session creation call, and parse the SQS Body into a counter initialization value, and a message payload, as shown below.  Split the SQS message on the first pipe '|'.
 
@@ -44,6 +45,8 @@ All messages are encrypted with AES using the counter mode of operation.  You wi
     aes = pyaes.AESModeOfOperationCTR(base64.b64decode(session['aesKey']),counter=ctr)
     msg = aes.decrypt(base64.b64decode(enc_msg))
 ```
+
+It is not practical to limit access of an SQS queue to a specific Cognito user.  If a third party can guess the ID of a user, and then guess the URL of an SQS endpoint, they have access to the SQS queue.  However these IDs and URLs are generated using a cryptographic hash, and so are not predictable.  The encryption key ensures that only the holder of the encryption key can decrypt the message.  This is a sufficient security model for most but not all use cases. 
 
 ## Creating a Cognito Identity Pool
 
@@ -178,6 +181,18 @@ You can also specify a Cognito pool name, and a version tag:
 # serverless deploy --env prod --region eu-west-1 --poolname my-cognito-pool --version 1.0.5
 ```
 
+## Testing
+
+Test scripts are in ./test.  To configure, you need to set an environment name and a region in your environment.  For example, if you are running an environment `dev` in us-east-1:
+
+```
+$ export SLS_ENV=dev1
+$ export SLS_REGION=us-east-1
+```
+
+The test_high_volume.py script can be used for load testing, and will need more than the default number of kinesis shards to support rapid delivery.
+
+To clean up after testing, run `remove_all [env-label]`.
 
 ## Credits
 

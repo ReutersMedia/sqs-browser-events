@@ -199,12 +199,10 @@ def cleanup_queues():
         prefixes = [ prefix+i for i in SQS_NAME_CHARS ]
     else:
         prefixes = [ prefix ]
-    n = len([remove_unused_queues(x,db_queues) for x in prefixes])
-    LOGGER.info("Removed {0} queues".format(n))
-    return n
-    
+    return sum([remove_unused_queues(x,db_queues) for x in prefixes])
+        
 def remove_unused_queues(sqs_name_prefix,db_queues):
-    db_queues = set(dynamo_sessions.get_all_sqs_urls())
+    db_queues = set(db_queues)
     c = boto3.client('sqs')
     if sqs_name_prefix is None:
         r = c.list_queues()
@@ -219,9 +217,11 @@ def remove_unused_queues(sqs_name_prefix,db_queues):
         LOGGER.info("Deleting queue {0}".format(x))
         try:
             c.delete_queue(QueueUrl=q)
+            return 1
         except:
             LOGGER.exception("Error removing queue {0}".format(x))
-    [ del_q(q) for q in aws_queues if q not in db_queues ]
+            return 0
+    return sum([ del_q(q) for q in aws_queues if q not in db_queues ])
 
 def gen_json_resp(d, code='200'):
     return {'statusCode': code,

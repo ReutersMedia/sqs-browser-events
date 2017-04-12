@@ -62,7 +62,7 @@ provider:
     SESSION_INACTIVE_PURGE_SEC: 604800
     HISTORY_TABLE: ${self:custom.historyTable}
     SQS_SENDER_LAMBDA: ${opt:env}-sqs-browser-sender
-    SQS_SENDER_BATCH_SIZE: 50
+    SQS_SENDER_BATCH_SIZE: 10
   include:
     - lib/**
 custom:
@@ -75,7 +75,7 @@ functions:
   SessionManagerCleanup:
     handler: session_manager.cleanup_lambda_handler
     name: ${opt:env}-sqs-browser-session-manager-cleanup
-    memorySize: 512
+    memorySize: 256
     timeout: 300
     description: API Gateway for session cleanup, should be called periodically, version ${self:custom.version}
     events:
@@ -121,7 +121,7 @@ functions:
     events:
       - stream:
           type: kinesis
-          batchSize: 1
+          batchSize: 10
           arn:
             Fn::GetAtt:
               - browserEventStream
@@ -142,7 +142,7 @@ functions:
   DispatcherAPI:
     handler: dispatcher.api_gateway_handler
     name: ${opt:env}-sqs-browser-dispatcher-api
-    memorySize: 512
+    memorySize: 256
     timeout: 300
     description: dispatch user messsages, version ${self:custom.version}
     events:
