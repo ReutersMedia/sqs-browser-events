@@ -64,6 +64,7 @@ def write_user_history(item_batch):
 def convert_to_dyn_objects(user_msg_list,tnow):
     tnow_dec = quantize_tstamp(decimal.Decimal(tnow))
     ts = TypeSerializer()
+    msg_d = {}
     def build_item(user_id,msg):
         # hash of message and timestamp
         item = msg.copy()
@@ -71,8 +72,12 @@ def convert_to_dyn_objects(user_msg_list,tnow):
         item['created'] = tnow_dec
         item = common.floats_to_decimals(item)
         item_dyn = dict([(k,ts.serialize(v)) for k,v in item.iteritems()])
-        return {'PutRequest':{'Item':item_dyn}}
-    return [build_item(user_id,msg) for user_id,msg in user_msg_list]
+        return ((item['userId'],item['messageId']),{'PutRequest':{'Item':item_dyn}})
+    # adding to dict will ensure only latest message kept for each user_id/message_id
+    for user_id,m in user_msg_list:
+        key,dyn_item = build_item(user_id,m)
+        msg_d[key] = dyn_item
+    return msg_d.values()
     
     
 def batch_add_user_history(user_msg_list,n_workers=25):

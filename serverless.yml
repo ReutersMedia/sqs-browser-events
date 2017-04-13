@@ -121,7 +121,7 @@ functions:
     events:
       - stream:
           type: kinesis
-          batchSize: 10
+          batchSize: 5
           arn:
             Fn::GetAtt:
               - browserEventStream
