@@ -87,10 +87,10 @@ class TestSessions(unittest.TestCase):
                      PartitionKey=str(ac_id2))
         time.sleep(10)
 
-        msgs_1a = self.get_msgs(s1a)
-        msgs_1b = self.get_msgs(s1b)
-        msgs_2a = self.get_msgs(s2a)
-        msgs_2b = self.get_msgs(s2b)
+        msgs_1a = get_msgs(s1a)
+        msgs_1b = get_msgs(s1b)
+        msgs_2a = get_msgs(s2a)
+        msgs_2b = get_msgs(s2b)
 
         self.assertListEqual(msgs_1a,['test1','test1-k'])
         self.assertListEqual(msgs_1b,['test1','test1-k','test2','test2-k'])
@@ -105,7 +105,7 @@ class TestSessions(unittest.TestCase):
         s = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id1,session1a))['session']
         r = self.call_gw('/notify/user/{0}'.format(user_id1),{'msg':'test9'})
         time.sleep(5)
-        msgs = self.get_msgs(s)
+        msgs = get_msgs(s)
         self.assertListEqual(msgs,['test9'])
         
     def test_broadcast(self):
@@ -115,7 +115,7 @@ class TestSessions(unittest.TestCase):
         s = self.call_gw('/create/{0}/{1}/{2}'.format(ac_id1,user_id1,session1a))['session']
         r = self.call_gw('/notify',{'msg':'test12'})
         time.sleep(30)
-        msgs = self.get_msgs(s)
+        msgs = get_msgs(s)
         self.assertListEqual(msgs,['test12'])
         
     def test_renew(self):
@@ -130,7 +130,7 @@ class TestSessions(unittest.TestCase):
         s1a = r['session']
         self.check_session(s1a)
         time.sleep(5)
-        msgs_1a = self.get_msgs(s1a)
+        msgs_1a = get_msgs(s1a)
         self.assertListEqual(msgs_1a,['test5'])
 
     def test_double_create(self):
@@ -144,7 +144,7 @@ class TestSessions(unittest.TestCase):
         s1a = r['session']
         r = self.call_gw('/notify/account/{0}'.format(ac_id1),{'msg':'test6'})
         time.sleep(5)
-        msgs_1a = self.get_msgs(s1a)
+        msgs_1a = get_msgs(s1a)
         self.assertListEqual(msgs_1a,['test6'])
 
     def test_create_destroy(self):

@@ -61,13 +61,16 @@ provider:
     SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
     SESSION_INACTIVE_PURGE_SEC: 604800
     HISTORY_TABLE: ${self:custom.historyTable}
-    SQS_SENDER_LAMBDA: ${opt:env}-sqs-browser-sender
+    SQS_SENDER_LAMBDA: ${self:custom.sqsSender}
     SQS_SENDER_BATCH_SIZE: 10
+    USER_HISTORY_ADDER_LAMBDA: ${self:custom.userHistoryAdder}
   include:
     - lib/**
 custom:
   version: ${opt:version, self:provider.defVersion}
   region: ${opt:region}
+  sqsSender: ${opt:env}-sqs-browser-sender
+  userHistoryAdder: ${opt:env}-sqs-browser-user-hist-adder
   sessionTable: ${opt:env}-sqs-browser-sessions
   browserEventStream: ${opt:env}-sqs-browser-event-stream
   historyTable: ${opt:env}-sqs-browser-messages
@@ -108,10 +111,16 @@ functions:
           path: /cleanup
   SQSSender:
     handler: sqs_sender.lambda_handler
-    name: ${opt:env}-sqs-browser-sender
+    name: ${self:custom.sqsSender}
     memorySize: 128
     timeout: 300
-    description: send a batch of messages to SQS queues
+    description: send a batch of messages to SQS queues, version ${self:custom.version}
+  UserHistoryAdder:
+    handler: user_history_adder.lambda_handler
+    name: ${self:custom.userHistoryAdder}
+    memorySize: 128
+    timeout: 300
+    description: add batch of user history entries to DynamoDB, version ${self:custom.version}
   EventDispatcher:
     handler: dispatcher.lambda_handler
     name: ${opt:env}-sqs-browser-event-dispatcher
@@ -200,7 +209,7 @@ resources:
       Type: AWS::Kinesis::Stream
       Properties:
         Name: ${self:custom.browserEventStream}
-        ShardCount: 1
+        ShardCount: 5
     noticeHistoryTable:
       Type: AWS::DynamoDB::Table
       Properties:

@@ -121,7 +121,8 @@ def create(d):
 
 def delete_expired():
     # delete ones that expired more than 2 days ago
-    # put in limit to ensure progress before potential timeout
+    # put in limit to ensure progress before potential timeout, rather than
+    # scan for all items first
     t = get_session_table()
     del_cnt = 0
     max_age = int(os.getenv('SESSION_INACTIVE_PURGE_SEC',86400))

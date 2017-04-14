@@ -36,7 +36,7 @@ def send_to_sqs_handler(q_batch):
                  Payload=json.dumps({'msg_list':msg_list},cls=common.DecimalEncoder),
                  InvocationType='Event')
     except:
-        LOGGER.error("Unable to send to sqs batch handler")
+        LOGGER.exception("Unable to send to sqs batch handler")
         return False
     return True
 
@@ -46,16 +46,18 @@ def parse_id(path_p,field):
     except:
         return None
 
-def add_to_user_history(user_d):
-    # create list of user_id,msg
-    user_msg_list = []
-    for user_id,msg_list in user_d.iteritems():
-        for m in msg_list:
-            m = m.copy()
-            m['is_read'] = 0
-            user_msg_list.append( (user_id,m) )
-    dynamo_sessions.batch_add_user_history(user_msg_list,n_workers=50)
-    LOGGER.info("Added {0} entries to user history".format(len(user_msg_list)))
+def add_to_user_history(user_msg_list):
+    try:
+        session = boto3.session.Session()
+        c = session.client('lambda')
+        c.invoke(FunctionName=os.getenv('USER_HISTORY_ADDER_LAMBDA'),
+                 Payload=json.dumps({'user_msg_list':user_msg_list},cls=common.DecimalEncoder),
+                 InvocationType='Event')
+        LOGGER.info("Dispatched {0} message groups to history adder lambda".format(len(user_msg_list)))
+    except:
+        LOGGER.exception("Unable to send to user history adder")
+        return False
+    return True
 
 def get_queue_batches(queue_d,bsize=25):
     cur_batch = []
@@ -70,8 +72,11 @@ def get_queue_batches(queue_d,bsize=25):
 def get_sessions_for_target(target):
     return dynamo_sessions.lookup(account_id=target[0],
                                   session_id=target[1],
-                                  user_id=target[2])
-        
+                                  user_id=target[2],
+                                  max_expired_age=43200)
+
+
+
 def dispatch(msg_d):
     # look up queues
     queue_d = defaultdict(list)
@@ -79,9 +84,10 @@ def dispatch(msg_d):
     for target,msg_list in msg_d.iteritems():
         for queue in get_sessions_for_target(target):
             queue_d[(queue['sqsUrl'],queue['aesKey'])].extend(msg_list)
-            user_d[queue['userId']].extend(msg_list)
+            user_d[int(queue['userId'])].extend(msg_list)
+
     # first write to user dynamodb history
-    user_hist_th = threading.Thread(target=add_to_user_history,args=(user_d,))
+    user_hist_th = threading.Thread(target=add_to_user_history,args=(user_d.items(),))
     user_hist_th.start()
 
     queue_batches = get_queue_batches(queue_d,bsize=int(os.getenv('SQS_SENDER_BATCH_SIZE',25)))
@@ -119,7 +125,11 @@ def parse_records(records):
                 if 'messageId' not in r:
                     # add message ID derived from Kinesis event
                     r['messageId'] = base64.urlsafe_b64encode(hashlib.sha1(rec['eventID']).digest())
-                yield (get_message_target(r),r)
+                t = get_message_target(r)
+                LOGGER.info("MessageId={0}, account={1}, user={2}, session={3}".format(r['messageId'],t[0],t[2],t[1]))
+                yield (t,r)
+            else:
+                LOGGER.error("Unrecognized record, is not from Kinesis: {0!r}".format(r))
         except:
             LOGGER.exception("Unable to dispatch record {0!r}".format(rec))
 
