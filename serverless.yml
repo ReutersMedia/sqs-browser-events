@@ -62,22 +62,27 @@ provider:
     SESSION_INACTIVE_PURGE_SEC: 604800
     HISTORY_TABLE: ${self:custom.historyTable}
     SQS_SENDER_LAMBDA: ${self:custom.sqsSender}
-    SQS_SENDER_BATCH_SIZE: 10
+    DISPATCHER_BATCH_SIZE: 20
     USER_HISTORY_ADDER_LAMBDA: ${self:custom.userHistoryAdder}
   include:
     - lib/**
 custom:
   version: ${opt:version, self:provider.defVersion}
   region: ${opt:region}
-  sqsSender: ${opt:env}-sqs-browser-sender
-  userHistoryAdder: ${opt:env}-sqs-browser-user-hist-adder
   sessionTable: ${opt:env}-sqs-browser-sessions
   browserEventStream: ${opt:env}-sqs-browser-event-stream
   historyTable: ${opt:env}-sqs-browser-messages
+  # function names
+  sqsSender: ${opt:env}-sqs-browser-sender
+  userHistoryAdder: ${opt:env}-sqs-browser-user-hist-adder
+  eventDispatcher: ${opt:env}-sqs-browser-event-dispatcher
+  sessionManagerCleanup: ${opt:env}-sqs-browser-session-manager-cleanup
+  sessionManagerAPI: ${opt:env}-sqs-browser-session-manager-api
+  userMessageAPI: ${opt:env}-sqs-browser-user-messages
 functions:
   SessionManagerCleanup:
     handler: session_manager.cleanup_lambda_handler
-    name: ${opt:env}-sqs-browser-session-manager-cleanup
+    name: ${self:custom.sessionManagerCleanup}
     memorySize: 256
     timeout: 300
     description: API Gateway for session cleanup, should be called periodically, version ${self:custom.version}
@@ -86,7 +91,7 @@ functions:
           rate: cron(15 */6 * * ? *)
   SessionManagerAPI:
     handler: session_manager.api_gateway_handler
-    name: ${opt:env}-sqs-browser-session-manager-api
+    name: ${self:custom.sessionManagerAPI}
     memorySize: 512
     timeout: 55
     description: API Gateway for session creation, removal, version ${self:custom.version}
@@ -123,7 +128,7 @@ functions:
     description: add batch of user history entries to DynamoDB, version ${self:custom.version}
   EventDispatcher:
     handler: dispatcher.lambda_handler
-    name: ${opt:env}-sqs-browser-event-dispatcher
+    name: ${self:custom.eventDispatcher}
     memorySize: 512
     timeout: 300
     description: dispatch user messsages, invoke directly or via Kinesis stream, version ${self:custom.version}  
@@ -137,7 +142,7 @@ functions:
               - Arn
   UserMessageAPI:
     handler: user_message_api.api_gateway_handler
-    name: ${opt:env}-sqs-browser-user-messages
+    name: ${self:custom.userMessageAPI}
     memorySize: 512
     timeout: 60
     description: respond to queries about user messages, version ${self:custom.version}
@@ -209,7 +214,7 @@ resources:
       Type: AWS::Kinesis::Stream
       Properties:
         Name: ${self:custom.browserEventStream}
-        ShardCount: 5
+        ShardCount: 10
     noticeHistoryTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -256,3 +261,69 @@ resources:
         ProvisionedThroughput:
           ReadCapacityUnits: 5
           WriteCapacityUnits: 5
+    sessionManagerAPIErrorMetricFilter:
+      Type: "AWS::Logs::MetricFilter"
+      Properties:
+        LogGroupName:
+          Ref: SessionManagerAPILogGroup
+        FilterPattern: "[ERROR]"
+        MetricTransformations:
+          -
+            MetricValue: "1"
+            MetricNamespace: "${opt:env}-SQSBrowser"
+            MetricName: "ErrorCount"
+    userMessageAPIErrorMetricFilter:
+      Type: "AWS::Logs::MetricFilter"
+      Properties:
+        LogGroupName:
+          Ref: UserMessageAPILogGroup
+        FilterPattern: "[ERROR]"
+        MetricTransformations:
+          -
+            MetricValue: "1"
+            MetricNamespace: "${opt:env}-SQSBrowser"
+            MetricName: "ErrorCount"            
+    sqsSenderErrorMetricFilter:
+      Type: "AWS::Logs::MetricFilter"
+      Properties:
+        LogGroupName:
+          Ref: SQSSenderLogGroup
+        FilterPattern: "[ERROR]"
+        MetricTransformations:
+          -
+            MetricValue: "1"
+            MetricNamespace: "${opt:env}-SQSBrowser"
+            MetricName: "ErrorCount"
+    userHistoryAdderErrorMetricFilter:
+      Type: "AWS::Logs::MetricFilter"
+      Properties:
+        LogGroupName:
+          Ref: UserHistoryAdderLogGroup
+        FilterPattern: "[ERROR]"
+        MetricTransformations:
+          -
+            MetricValue: "1"
+            MetricNamespace: "${opt:env}-SQSBrowser"
+            MetricName: "ErrorCount"
+    eventDispatcherErrorMetricFilter:
+      Type: "AWS::Logs::MetricFilter"
+      Properties:
+        LogGroupName:
+          Ref: EventDispatcherLogGroup
+        FilterPattern: "[ERROR]"
+        MetricTransformations:
+          -
+            MetricValue: "1"
+            MetricNamespace: "${opt:env}-SQSBrowser"
+            MetricName: "ErrorCount"
+    sessionManagerCleanupErrorMetricFilter:
+      Type: "AWS::Logs::MetricFilter"
+      Properties:
+        LogGroupName:
+          Ref: SessionManagerCleanupLogGroup
+        FilterPattern: "[ERROR]"
+        MetricTransformations:
+          -
+            MetricValue: "1"
+            MetricNamespace: "${opt:env}-SQSBrowser"
+            MetricName: "ErrorCount"

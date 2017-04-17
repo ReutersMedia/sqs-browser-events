@@ -58,11 +58,17 @@ def get_credentials(cog_client, cog_id):
     
 def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None):
     # first lookup to see if we already have for this session
-    d = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id)
+    d = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id, max_expired_age=86400)
+    cog_c = boto3.client('cognito-identity')
     if len(d)>= 1:
         LOGGER.info("Session {0} already exists, reusing".format(session_id))
-        return d[0]
-    cog_c = boto3.client('cognito-identity')
+        # if credentials expire in less than an hour, then renew
+        session = d[0]
+        if int(session['expires'])-int(time.time()) < 3600:
+            # renew
+            creds = get_credentials(cog_c,session['identityId'])
+            session.update(creds)
+        return session
     sqs_c = boto3.client('sqs')
     pool_id = get_identity_pool()
     r = cog_c.get_id(IdentityPoolId=pool_id)
@@ -200,7 +206,8 @@ def cleanup_queues():
     else:
         prefixes = [ prefix ]
     return sum([remove_unused_queues(x,db_queues) for x in prefixes])
-        
+
+
 def remove_unused_queues(sqs_name_prefix,db_queues):
     db_queues = set(db_queues)
     c = boto3.client('sqs')
@@ -234,6 +241,9 @@ def gen_json_resp(d, code='200'):
 def api_gateway_handler(event, context):
     LOGGER.debug("Received event: {0!r}".format(event))
     path_p = event.get('pathParameters')
+    qsp = event.get('queryStringParameters')
+    if qsp is None:
+        qsp = {}
     try:
         res = event['resource']
         if res.startswith('/create'):

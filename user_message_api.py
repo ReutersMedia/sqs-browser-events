@@ -47,9 +47,13 @@ def api_gateway_handler(event, context):
         else:
             start = parse_tstamp(qsp,'start')
             end = parse_tstamp(qsp,'end')
+            # type filter
+            _type = qsp.get('_type')
+            if _type is not None:
+                _type = [x.strip() for x in _type.split(',')]
             user_id = int(path_p['userId'])
-            msgs = dynamo_sessions.get_user_messages(user_id,start_t=start,end_t=end)
-            msgs.sort(key=lambda x: x.get('created'))
+            msgs = dynamo_sessions.get_user_messages(user_id,start_t=start,end_t=end,type_filter=_type)
+            msgs.sort(key=lambda x: x.get('created'),reverse=True)
             return common.gen_json_resp({'success':True,
                                          'messages':msgs})
     except:

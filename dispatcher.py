@@ -5,11 +5,11 @@ import sys
 import base64
 import hashlib
 import json
-import concurrent.futures
 import threading
 import time
 
 from collections import defaultdict
+from multiprocessing.pool import ThreadPool
 
 import boto3
 
@@ -46,20 +46,21 @@ def parse_id(path_p,field):
     except:
         return None
 
-def add_to_user_history(user_msg_list):
+def add_user_history(user_batch):
     try:
         session = boto3.session.Session()
         c = session.client('lambda')
         c.invoke(FunctionName=os.getenv('USER_HISTORY_ADDER_LAMBDA'),
-                 Payload=json.dumps({'user_msg_list':user_msg_list},cls=common.DecimalEncoder),
+                 Payload=json.dumps({'user_msg_list':user_batch},cls=common.DecimalEncoder),
                  InvocationType='Event')
-        LOGGER.info("Dispatched {0} message groups to history adder lambda".format(len(user_msg_list)))
+        LOGGER.info("Dispatched {0} message groups to history adder lambda".format(len(user_batch)))
     except:
         LOGGER.exception("Unable to send to user history adder")
         return False
     return True
 
-def get_queue_batches(queue_d,bsize=25):
+
+def get_dict_batches(queue_d,bsize=25):
     cur_batch = []
     for q,msg_list in queue_d.iteritems():
         if len(cur_batch)>=bsize:
@@ -76,7 +77,6 @@ def get_sessions_for_target(target):
                                   max_expired_age=43200)
 
 
-
 def dispatch(msg_d):
     # look up queues
     queue_d = defaultdict(list)
@@ -86,21 +86,20 @@ def dispatch(msg_d):
             queue_d[(queue['sqsUrl'],queue['aesKey'])].extend(msg_list)
             user_d[int(queue['userId'])].extend(msg_list)
 
-    # first write to user dynamodb history
-    user_hist_th = threading.Thread(target=add_to_user_history,args=(user_d.items(),))
-    user_hist_th.start()
-
-    queue_batches = get_queue_batches(queue_d,bsize=int(os.getenv('SQS_SENDER_BATCH_SIZE',25)))
-    sqs_urls = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-        future_to_sqsurl = {executor.submit(send_to_sqs_handler, qbatch): qbatch for qbatch in queue_batches}
-        for future in concurrent.futures.as_completed(future_to_sqsurl):
-            sqs_url_list = future_to_sqsurl[future]
-            success = future.result()
-            if success:
-                sqs_urls.extend(sqs_url_list)
+    q_tp = ThreadPool(20)
+    u_tp = ThreadPool(20)
+    try:
+        queue_batches = get_dict_batches(queue_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
+        queue_r = q_tp.map_async(lambda x: send_to_sqs_handler(x), queue_batches)
+        user_batches = get_dict_batches(user_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
+        user_r = u_tp.map_async(lambda x: add_user_history(x), user_batches)
+        user_r.wait()
+        queue_r.wait()
+        sqs_urls = queue_r.get()
+    finally:
+        q_tp.close()
+        u_tp.close()
     LOGGER.info("Sent {0} messages to SQS handler".format(len(sqs_urls)))
-    user_hist_th.join()
     return sqs_urls
 
 

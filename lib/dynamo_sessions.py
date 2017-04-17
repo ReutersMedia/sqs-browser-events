@@ -104,14 +104,21 @@ def batch_add_user_history(user_msg_list,n_workers=25):
         LOGGER.error("Failure sending user batch writes, dropped {0}".format(len(failures)))
     LOGGER.info("Done adding to user history")
 
-def get_user_messages(user_id,start_t=None,end_t=None):
-    q = {'KeyConditionExpression': Key('userId').eq(user_id)}
+def get_user_messages(user_id,start_t=None,end_t=None,type_filter=None):
+    q = {'KeyConditionExpression': Key('userId').eq(user_id)} 
     if start_t is not None and end_t is not None:
         q['FilterExpression'] = Attr('created').gte(start_t) & Attr('created').lte(end_t)
     elif start_t is not None:
         q['FilterExpression'] = Attr('created').gte(start_t)
     elif end_t is not None:
         q['FilterExpression'] = Attr('created').lte(end_t)
+    if type_filter is not None:
+        LOGGER.info("Filtering by type: {0}".format(type_filter))
+        type_exp = Attr('_type').is_in(type_filter)
+        if 'FilterExpression' in q:
+            q['FilterExpression'] = q['FilterExpression'] & type_exp
+        else:
+            q['FilterExpression'] = type_exp
     return collect_results(get_history_table().query,q)
         
 def create(d):
