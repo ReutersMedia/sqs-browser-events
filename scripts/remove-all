@@ -1,0 +1,45 @@
+#!/usr/bin/python
+from __future__ import print_function
+import sys
+import boto3
+import time
+
+if len(sys.argv)<=2:
+    print("Usage: {0} [env-label] [region]".format(sys.argv[0]))
+    sys.exit(1)
+env_name = sys.argv[1]
+region = sys.argv[2]
+
+db = boto3.client("dynamodb",region_name=region)
+tab_name = "{0}-sqs-browser-sessions".format(env_name)
+while True:
+    r = db.scan(TableName=tab_name)
+    items = [ (x['userId'],x['sessionId']) for x in r['Items'] ]
+    if len(items)==0:
+        break
+    for item in items:
+        print("Deleting: {0}".format(item))
+        db.delete_item(TableName=tab_name,
+                       Key={'userId':item[0],
+                            'sessionId':item[1]})
+
+    
+
+c = boto3.client("sqs",region_name=region)
+q_deleted = set()
+while True:
+    r = c.list_queues(QueueNamePrefix="cognito-sqs-{0}".format(env_name))
+    queues = r.get('QueueUrls')
+    if queues is None or len(queues)==0:
+        break
+    for q in queues:
+        if q in q_deleted:
+            continue
+        print("Removing queue {0}".format(q))
+        try:
+            c.delete_queue(QueueUrl=q)
+            q_deleted.add(q)
+        except Exception,ex:
+            print("   error: {0}".format(str(ex)))
+    time.sleep(1)
+    

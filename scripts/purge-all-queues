@@ -1,0 +1,28 @@
+#!/usr/bin/python
+from __future__ import print_function
+import sys
+import boto3
+import time
+
+if len(sys.argv)<=2:
+    print("Usage: {0} [env-label] [region]".format(sys.argv[0]))
+    sys.exit(1)
+env_name = sys.argv[1]
+region = sys.argv[2]
+
+c = boto3.client("sqs",region_name=region)
+
+SQS_NAME_CHARS = [ chr(x) for x in range(97,123)+range(65,91)+range(48,58) ] + ['-','_']
+
+for ch in SQS_NAME_CHARS:
+    r = c.list_queues(QueueNamePrefix="cognito-sqs-{0}{1}".format(env_name,ch))
+    queues = r.get('QueueUrls')
+    if queues is None:
+        continue
+    for q in queues:
+        print("Purging {0}".format(q))
+        try:
+            c.purge_queue(QueueUrl=q)
+        except:
+            print("   error purging")
+    
