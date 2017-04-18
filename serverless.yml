@@ -62,7 +62,10 @@ provider:
     SESSION_INACTIVE_PURGE_SEC: 604800
     HISTORY_TABLE: ${self:custom.historyTable}
     SQS_SENDER_LAMBDA: ${self:custom.sqsSender}
-    DISPATCHER_BATCH_SIZE: 20
+    DISPATCHER_BATCH_SIZE: 5
+    SQS_MESSAGE_RETENTION_PERIOD: 7200
+    SESSION_TTL: 86400
+    USER_MESSAGE_TTL: 86400
     USER_HISTORY_ADDER_LAMBDA: ${self:custom.userHistoryAdder}
   include:
     - lib/**

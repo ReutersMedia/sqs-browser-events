@@ -59,33 +59,48 @@ def add_user_history(user_batch):
         return False
     return True
 
+# some buffer for overhead
+MAX_MESSAGE_SIZE = 100000
 
-def get_dict_batches(queue_d,bsize=25):
-    cur_batch = []
+def get_dict_batches(queue_d,bsize=25,max_msg_list_size=10):
+    cur_batch = defaultdict(list)
+    batch_size = 0
     for q,msg_list in queue_d.iteritems():
-        if len(cur_batch)>=bsize:
-            yield cur_batch
-            cur_batch = []
-        cur_batch.append( (q,msg_list) )
-    yield cur_batch
+        for msg in msg_list:
+            msg_size = len(json.dumps(msg))
+            if msg_size >= MAX_MESSAGE_SIZE:
+                raise DispatcherException("exceeded maximum message size of {0}".format(MAX_MESSAGE_SIZE))
+            if len(cur_batch)>=bsize \
+               or batch_size+msg_size >= MAX_MESSAGE_SIZE \
+               or len(cur_batch[q])>=max_msg_list_size:
+                yield [(k,v) for k,v in cur_batch.iteritems() if len(v)>0]
+                cur_batch = defaultdict(list)
+                batch_size = 0
+            cur_batch[q].append(msg)
+            batch_size += msg_size
+    yield [(k,v) for k,v in cur_batch.iteritems() if len(v)>0]
     
 
 def get_sessions_for_target(target):
     return dynamo_sessions.lookup(account_id=target[0],
                                   session_id=target[1],
                                   user_id=target[2],
-                                  max_expired_age=43200)
+                                  max_expired_age=86400)
 
 
 def dispatch(msg_d):
     # look up queues
     queue_d = defaultdict(list)
     user_d = defaultdict(list)
+    tnow = time.time()
     for target,msg_list in msg_d.iteritems():
         for queue in get_sessions_for_target(target):
-            queue_d[(queue['sqsUrl'],queue['aesKey'])].extend(msg_list)
+            # only send to SQS if session is not expired
+            if int(queue['expires']) > tnow:
+                queue_d[(queue['sqsUrl'],queue['aesKey'])].extend(msg_list)
+            # but accumulate user messages
             user_d[int(queue['userId'])].extend(msg_list)
-
+    LOGGER.info("Dispatching user messages, {0} users, {1} total messages".format(len(user_d),sum([len(x) for x in user_d.itervalues()])))
     q_tp = ThreadPool(20)
     u_tp = ThreadPool(20)
     try:
@@ -138,6 +153,8 @@ def lambda_handler(event, context):
     recs = event['Records']
     # kinesis events are in order, others are not
     recs.sort(cmp=lambda x,y: cmp(k_seq(x),k_seq(y)))
+    # filter out user and account messages
+    recs = [x for x in recs if x.get('_type') not in ('account','user')]
     targets = defaultdict(list)
     [targets[target].append(msg) for target,msg in parse_records(recs)]
     dispatch(targets)

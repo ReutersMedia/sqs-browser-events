@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import os
 import sys
+import time
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(current_path, './lib'))
@@ -17,9 +18,11 @@ def lambda_handler(event, context):
     # create list of user_id,msg
     user_msg_list = event['user_msg_list']
     msg_list = []
+    msg_ttl = int(time.time())+int(os.getenv('USER_MESSAGE_TTL'))
     for user_id,msgs in user_msg_list:
         for m in msgs:
             m['is_read'] = 0
+            m['ttl'] = msg_ttl
             msg_list.append( (user_id,m) )
     dynamo_sessions.batch_add_user_history(msg_list,n_workers=50)
     LOGGER.info("Added {0} entries to user history".format(len(msg_list)))

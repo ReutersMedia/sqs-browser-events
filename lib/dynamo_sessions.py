@@ -19,8 +19,12 @@ def get_session_table():
     dynamodb = boto3.resource('dynamodb')
     return dynamodb.Table(os.getenv('SESSION_TABLE'))
 
-def get_history_table():
-    dynamodb = boto3.resource('dynamodb')
+def get_history_table(new_session=False):
+    if new_session:
+        session = boto3.session.Session()
+        dynamodb = session.resource('dynamodb')
+    else:
+        dynamodb = boto3.resource('dynamodb')
     return dynamodb.Table(os.getenv('HISTORY_TABLE'))
 
 def quantize_tstamp(ts):
@@ -28,12 +32,13 @@ def quantize_tstamp(ts):
 
 def set_message_read(user_id, msg_id):
     try:
-        r=get_history_table().update_item(
+        r=get_history_table(new_session=True).update_item(
             Key={'userId':user_id,
                  'messageId':msg_id},
             UpdateExpression="set is_read = :a",
             ExpressionAttributeValues={':a': 1},
             ConditionExpression="is_read <> :a")
+        LOGGER.info("Read-receipted user_id={0} message_id={1}".format(user_id,msg_id))
         return True
     except botocore.exceptions.ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
@@ -42,7 +47,18 @@ def set_message_read(user_id, msg_id):
         else:
             LOGGER.exception("Eror updating read setting for user_id={0}, msg_id={1}".format(user_id,msg_id))
             return False
-        
+
+def set_messages_read(user_id, msg_id_list, n_workers=30):
+    # as it's an update, can't use batch-write
+    LOGGER.info("read-receipting {0} messages for user_id={1}".format(len(msg_id_list),user_id))
+    msg_update_status = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+        future_to_msg_id = {executor.submit(set_message_read, user_id, msg_id): msg_id for msg_id in msg_id_list}
+        for future in concurrent.futures.as_completed(future_to_msg_id):
+            msg_id = future_to_msg_id[future]
+            msg_update_status[msg_id] = future.result()
+    return msg_update_status
+
 
 def write_user_history(item_batch):
     # use a consistent timestamp (tnow) so that any reprocessing results in overwriting if
@@ -126,27 +142,6 @@ def create(d):
     LOGGER.debug("Created session {0} for account {1}, user {3}, queue={2}".format(d['sessionId'],d['accountId'],d['userId'],d['sqsUrl']))
     return 
 
-def delete_expired():
-    # delete ones that expired more than 2 days ago
-    # put in limit to ensure progress before potential timeout, rather than
-    # scan for all items first
-    t = get_session_table()
-    del_cnt = 0
-    max_age = int(os.getenv('SESSION_INACTIVE_PURGE_SEC',86400))
-    while True:
-        q = {'ProjectionExpression': "userId, sessionId",
-             'Limit':1000,
-             'FilterExpression': Attr('expires').lt(int(time.time()-max_age))}
-        sessions = collect_results(t.scan,q)
-        for s in sessions:
-            LOGGER.info("Deleting expired session, userId={0}, sessionId={1}".format(
-                s['userId'],s['sessionId']))
-            t.delete_item(Key={'userId':s['userId'],
-                               'sessionId':s['sessionId']})
-            del_cnt += 1
-        if len(sessions)<1000:
-            break
-    return del_cnt
 
 def destroy(account_id, user_id, session_id):
     get_session_table().delete_item(Key={'userId':user_id,

@@ -36,10 +36,11 @@ def api_gateway_handler(event, context):
         res = event['resource']
         if res.startswith('/messages/set-read'):
             user_id = int(path_p['userId'])
-            msg_id = path_p['messageId']
-            is_set = dynamo_sessions.set_message_read(user_id, msg_id)
+            msg_id_list = path_p['messageId'].split(',')
+            msg_status_d = dynamo_sessions.set_messages_read(user_id, msg_id_list)
             if is_set:
-                return common.gen_json_resp({'success':True})
+                return common.gen_json_resp({'success':True,
+                                             'messages_receipted': msg_status_d})
             else:
                 return common.gen_json_resp({'success':False,
                                              'message':"not found"},

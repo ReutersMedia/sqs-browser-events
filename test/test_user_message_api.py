@@ -76,9 +76,9 @@ class TestUserMessageApi(unittest.TestCase):
         for m in r['messages']:
             self.assertEqual(m['is_read'],0)
         # set read receipt
-        for m in r['messages']:
-            r = self.call_gw('/messages/set-read/user/{0}/message/{1}'.format(user_id,m['messageId']))
-            pprint.pprint(r)
+        msg_list = ','.join([m['messageId'] for m in r['messages']])
+        r = self.call_gw('/messages/set-read/user/{0}/message/{1}'.format(user_id,msg_list))
+        pprint.pprint(r)
         time.sleep(0.5)
         r = self.call_gw('/messages/user/{0}'.format(user_id))
         for m in r['messages']:

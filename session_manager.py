@@ -23,15 +23,19 @@ LOGGER.setLevel(logging.INFO)
 class SessionManagerException(Exception):
     pass
 
+def get_cognito_client():
+    cog_region = os.getenv('COGNITO_REGION')
+    if cog_region is not None and len(cog_region)>0:
+        return boto3.client('cognito-identity',region_name=cog_region)
+    else:
+        return boto3.client('cognito-identity')
+
+        
 _identity_pool_id = None
 def get_identity_pool():
     global _identity_pool_id
     if _identity_pool_id==None:
-        cog_region = os.getenv('COGNITO_REGION')
-        if cog_region is not None and len(cog_region)>0:
-            c = boto3.client('cognito-identity',region_name=cog_region)
-        else:
-            c = boto3.client('cognito-identity')
+        c = get_cognito_client()
         pools = c.list_identity_pools(MaxResults=60)['IdentityPools']
         pool_name = os.getenv('COGNITO_IDENTITY_POOL')
         try:
@@ -51,15 +55,18 @@ def parse_id(path_p,field):
 
 def get_credentials(cog_client, cog_id):
     r = cog_client.get_credentials_for_identity(IdentityId=cog_id)
+    expires = int(time.mktime(r['Credentials']['Expiration'].utctimetuple()))
+    session_ttl = expires + int(os.getenv('SESSION_TTL'))
     return {'accessKey': r['Credentials']['AccessKeyId'],
             'secretKey': r['Credentials']['SecretKey'],
             'sessionToken': r['Credentials']['SessionToken'],
-            'expires': int(time.mktime(r['Credentials']['Expiration'].utctimetuple()))}
+            'expires': expires,
+            'ttl': session_ttl}
     
 def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None):
     # first lookup to see if we already have for this session
     d = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id, max_expired_age=86400)
-    cog_c = boto3.client('cognito-identity')
+    cog_c = get_cognito_client()
     if len(d)>= 1:
         LOGGER.info("Session {0} already exists, reusing".format(session_id))
         # if credentials expire in less than an hour, then renew
@@ -97,12 +104,12 @@ def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None):
     # unix /dev/random has more entropy than /dev/urandom, and python random
     with open('/dev/random','rb') as f_rand:
         aes_key = f_rand.read(32)
+    q_attr = {'MessageRetentionPeriod':str(int(os.getenv('SQS_MESSAGE_RETENTION_PERIOD')))}
+    if policy is not None:
+        q_attr['Policy'] = json.dumps(policy)
     try:
-        if policy is not None:
-            r = sqs_c.create_queue(QueueName=queue_name,
-                                   Attributes={'Policy':json.dumps(policy)})
-        else:
-            r = sqs_c.create_queue(QueueName=queue_name)
+        r = sqs_c.create_queue(QueueName=queue_name,
+                               Attributes=q_attr)
     except botocore.errorfactory.ClientError, err:
         if err.response['Error']['Code']=='QueueAlreadyExists' and policy is not None:
             LOGGER.info("Queue {0} already exists, resetting policy".format(queue_name))
@@ -161,7 +168,7 @@ def renew_session(account_id, user_id, session_id):
         return {"success":False,
                 "message":"Session has expired"}
     m = m[0]
-    c = boto3.client('cognito-identity')
+    c = get_cognito_client()
     cred_d = get_credentials(c,m['identityId'])
     m.update(cred_d)
     dynamo_sessions.create(m)
@@ -177,12 +184,6 @@ def create_session(account_id, user_id, session_id, restrict_ip=None):
     LOGGER.info("created session for account_id={0}, session_id={1}, user_id={2}".format(account_id,session_id,user_id))
     return {"success":True,
             "session":m}
-
-
-def cleanup_sessions():
-    n = dynamo_sessions.delete_expired()
-    LOGGER.info("Removed {0} sessions".format(n))
-    return n
 
     
 SQS_NAME_CHARS = [ chr(x) for x in range(97,123)+range(65,91)+range(48,58) ] + ['-','_']
@@ -266,8 +267,7 @@ def api_gateway_handler(event, context):
                                        parse_id(path_p,'userId'),
                                        parse_p['sessionId'])
         elif res.startswith('/cleanup'):
-            return {'sessions_removed':cleanup_sessions(),
-                    'queues_removed':cleanup_queues(),
+            return {'queues_removed':cleanup_queues(),
                     'success':True}
         else:
             raise SessionManagerException("Unrecognized action")
@@ -280,5 +280,4 @@ def api_gateway_handler(event, context):
     
 def cleanup_lambda_handler(event, context):
     LOGGER.info("Cleanup handler called")
-    cleanup_sessions()
     cleanup_queues()
