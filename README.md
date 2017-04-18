@@ -212,7 +212,7 @@ Will send the folling JSON to every queue associated with the given account ID.
 In some cases it is useful to retrieve the message history for a user, for example when they are logging after being absent for some time.  Messages will accumulate depending on the SESSION_INACTIVE_PURGE_SEC parameter set in serverless, by default 7 days.  When messages are dispatched, a list of unique userIDs receiving the message is compiled, and those messages are put into a notification history table in DynamoDB.  If a user has several active sessions, the message is inserted for that userId only once.  A user's messages can be retrieved and read-receipted using an API Gateway authenticated by IAM.  
 
 * `/messages/user/[userId]`: retrieve messages for a user, optionally accepting a `start` and/or and `end` parameter in epoch seconds.  If a message has been read-receipted, an `is_read` parameter will be present and equal to 1, otherwise it will be present and equal to 0.
-* `/messages/set-read/user/[userId]/message/[messageId]`: set a message as read.  this updates the 'is_read' parameter to 1 from its initial value of 0.
+* `/messages/set-read/user/[userId]/message/[messageId]`: set a message as read.  this updates the 'is_read' parameter to 1 from its initial value of 0.  The messageId can be a comma-delimited list of IDs for the same user.
 
 
 ## Deploying
