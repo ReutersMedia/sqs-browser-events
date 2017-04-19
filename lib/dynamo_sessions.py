@@ -75,11 +75,29 @@ def write_user_history(item_batch):
         if unproc is not None and hist_table in unproc and len(unproc[hist_table])>0:
             return unproc[hist_table]
         return []
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == 'ValidationException':
+            LOGGER.error("Validation exception writing: {0!r}".format(item_batch))
+        else:
+            LOGGER.exception("DynamoDB Client error")
+        return item_batch
     except:
         LOGGER.exception("Error inserting user batch")
         # assume all failed
         return item_batch
 
+def trim_empty_leafs(d):
+    for k,v in d.iteritems():
+        if isinstance(v,dict):
+            v = dict(trim_empty_leafs(v))
+            if len(v)>0:
+                yield (k,v)
+        elif isinstance(v,str) or isinstance(v,unicode):
+            if len(v)>0:
+                yield (k,v)
+        elif v is not None:
+            yield (k,v)
+    
 def convert_to_dyn_objects(user_msg_list,tnow):
     tnow_dec = quantize_tstamp(decimal.Decimal(tnow))
     ts = TypeSerializer()
@@ -90,7 +108,9 @@ def convert_to_dyn_objects(user_msg_list,tnow):
         item['userId'] = user_id
         item['created'] = tnow_dec
         item = common.floats_to_decimals(item)
+        # filter out item values
         item_dyn = dict([(k,ts.serialize(v)) for k,v in item.iteritems()])
+        item_dyn = dict(trim_empty_leafs(item_dyn))
         return ((item['userId'],item['messageId']),{'PutRequest':{'Item':item_dyn}})
     # adding to dict will ensure only latest message kept for each user_id/message_id
     for user_id,m in user_msg_list:
