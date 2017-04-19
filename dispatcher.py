@@ -73,12 +73,12 @@ def get_dict_batches(queue_d,bsize=25,max_msg_list_size=10):
             if len(cur_batch)>=bsize \
                or batch_size+msg_size >= MAX_MESSAGE_SIZE \
                or len(cur_batch[q])>=max_msg_list_size:
-                yield [(k,v) for k,v in cur_batch.iteritems() if len(v)>0]
+                yield [(k,v) for k,v in cur_batch.items() if len(v)>0]
                 cur_batch = defaultdict(list)
                 batch_size = 0
             cur_batch[q].append(msg)
             batch_size += msg_size
-    yield [(k,v) for k,v in cur_batch.iteritems() if len(v)>0]
+    yield [(k,v) for k,v in cur_batch.items() if len(v)>0]
     
 
 def get_sessions_for_target(target):

@@ -15,6 +15,9 @@ LOGGER.setLevel(logging.INFO)
 
 import common
 
+import cachetools.func
+
+
 def get_session_table():
     dynamodb = boto3.resource('dynamodb')
     return dynamodb.Table(os.getenv('SESSION_TABLE'))
@@ -178,7 +181,8 @@ def lookup(account_id=None, user_id=None, session_id=None, max_expired_age=None)
     else:
         return collect_results(get_session_table().scan,q)
 
-
+# expensive call, so cache briefly if we have a flood of broadcast messages
+@cachetools.func.ttl_cache(maxsize=10,ttl=30)
 def get_all_sessions(max_expired_age=None):
     q = {'Select': 'ALL_ATTRIBUTES'}
     if max_expired_age is not None:

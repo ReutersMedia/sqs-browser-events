@@ -63,7 +63,11 @@ def get_credentials(cog_client, cog_id):
             'expires': expires,
             'ttl': session_ttl}
     
-def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None):
+def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None, msg_retention_period=None):
+    if msg_retention_period is None:
+        msg_retention_period = str(int(os.getenv('SQS_MESSAGE_RETENTION_PERIOD')))
+    else:
+        msg_retention_period = str(int(msg_retention_period))
     # first lookup to see if we already have for this session
     d = dynamo_sessions.lookup(account_id, user_id=user_id, session_id=session_id, max_expired_age=86400)
     cog_c = get_cognito_client()
@@ -99,12 +103,12 @@ def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None):
     # use hash to generate queue name based on account, session
     # this ensures it is well-distributed, which will be useful when
     # we need to scroll through a large number of queues
-    queue_name = os.getenv('SQS_QUEUE_PREFIX') + \
+    queue_name = os.getenv('SQS_QUEUE_PREFIX') + '-' + \
                  base64.urlsafe_b64encode(hashlib.sha1("{0}-{1}".format(account_id,session_id)).digest()).replace('=','')
     # unix /dev/random has more entropy than /dev/urandom, and python random
     with open('/dev/random','rb') as f_rand:
         aes_key = f_rand.read(32)
-    q_attr = {'MessageRetentionPeriod':str(int(os.getenv('SQS_MESSAGE_RETENTION_PERIOD')))}
+    q_attr = {'MessageRetentionPeriod':msg_retention_period}
     if policy is not None:
         q_attr['Policy'] = json.dumps(policy)
     try:
@@ -177,10 +181,10 @@ def renew_session(account_id, user_id, session_id):
             "session":m}
     
     
-def create_session(account_id, user_id, session_id, restrict_ip=None):
+def create_session(account_id, user_id, session_id, restrict_ip=None, msg_retention_period=None):
     if len(session_id)>256:
         raise SessionManagerException("sessionId can not be longer than 256 characters")
-    m = create_sqs_queue(account_id, user_id, session_id, restrict_ip=restrict_ip)
+    m = create_sqs_queue(account_id, user_id, session_id, restrict_ip=restrict_ip, msg_retention_period=msg_retention_period)
     LOGGER.info("created session for account_id={0}, session_id={1}, user_id={2}".format(account_id,session_id,user_id))
     return {"success":True,
             "session":m}
@@ -250,7 +254,8 @@ def api_gateway_handler(event, context):
         if res.startswith('/create'):
             r = create_session(parse_id(path_p,'accountId'),
                                parse_id(path_p,'userId'),
-                               path_p['sessionId'])
+                               path_p['sessionId'],
+                               msg_retention_period=qsp.get('MessageRetentionPeriod'))
         elif res.startswith('/destroy'):
             r = destroy_session(parse_id(path_p,'accountId'),
                                 parse_id(path_p,'userId'),

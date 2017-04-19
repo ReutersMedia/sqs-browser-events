@@ -176,7 +176,7 @@ In the API calls below, the accountId must be an integer, and sessionId must be 
 * `/status`: Return list of all active sessions.
 * `/cleanup`: Identity unused queues and remove them
 
-Typically you will `create` a session when a user logs in, generating a session ID, and `renew` it periodically as the access key approaches expiration.
+Typically you will `create` a session when a user logs in, generating a session ID, and `renew` it periodically as the access key approaches expiration.  The `/create` methods also accept a `MessageRetentionPeriod` period, which is used to set the message retention period when creating the SQS queue.
 
 
 ## Dispatching Messages
