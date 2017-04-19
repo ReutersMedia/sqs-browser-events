@@ -34,7 +34,7 @@ def send_to_sqs(payload):
     try:
         aes_key = base64.b64decode(aes_key_b64)
         msg_batch = [ {"Id":str(i),"MessageBody":encode_msg(aes_key,x)} for i,x in enumerate(msg_list) ]
-        LOGGER.info("Sending {1} messages to {0}".format(sqs_url,len(msg_batch)))
+        LOGGER.info(json.dumps({'sqsMessageCount':len(msg_batch)}))
         session = boto3.session.Session()
         c = session.client('sqs')
         n_retries = 0

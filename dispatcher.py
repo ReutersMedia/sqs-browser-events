@@ -30,11 +30,14 @@ def send_to_sqs_handler(q_batch):
     try:
         # flatten
         msg_list = [(sqs_url,aes_key,msg_list) for (sqs_url,aes_key),msg_list in q_batch]
+        if len(msg_list)==0:
+            return True
         session = boto3.session.Session()
         c = session.client('lambda')
         c.invoke(FunctionName=os.getenv('SQS_SENDER_LAMBDA'),
                  Payload=json.dumps({'msg_list':msg_list},cls=common.DecimalEncoder),
                  InvocationType='Event')
+        LOGGER.info("Dispatched {0} message groups to SQS sender lambda".format(len(msg_list)))
     except:
         LOGGER.exception("Unable to send to sqs batch handler")
         return False
@@ -47,6 +50,8 @@ def parse_id(path_p,field):
         return None
 
 def add_user_history(user_batch):
+    if len(user_batch)==0:
+        return True
     try:
         session = boto3.session.Session()
         c = session.client('lambda')
@@ -93,14 +98,21 @@ def dispatch(msg_d):
     queue_d = defaultdict(list)
     user_d = defaultdict(list)
     tnow = time.time()
+    msg_type_cnt = defaultdict(int)
     for target,msg_list in msg_d.iteritems():
+        for m in msg_list:
+            msg_type_cnt[m.get('_type','None')] += 1
         for queue in get_sessions_for_target(target):
             # only send to SQS if session is not expired
             if int(queue['expires']) > tnow:
                 queue_d[(queue['sqsUrl'],queue['aesKey'])].extend(msg_list)
             # but accumulate user messages
             user_d[int(queue['userId'])].extend(msg_list)
-    LOGGER.info("Dispatching user messages, {0} users, {1} total messages".format(len(user_d),sum([len(x) for x in user_d.itervalues()])))
+    if len(user_d)==0 and len(queue_d)==0:
+        return []
+    msg_type_info = dict([('_msgcount_'+k,v) for k,v in msg_type_cnt.iteritems()])
+    msg_type_info['dispatchEventCount'] = sum([len(x) for x in user_d.itervalues()])
+    LOGGER.info(json.dumps(msg_type_info))
     q_tp = ThreadPool(20)
     u_tp = ThreadPool(20)
     try:
@@ -114,7 +126,6 @@ def dispatch(msg_d):
     finally:
         q_tp.close()
         u_tp.close()
-    LOGGER.info("Sent {0} messages to SQS handler".format(len(sqs_urls)))
     return sqs_urls
 
 
@@ -157,7 +168,8 @@ def lambda_handler(event, context):
     recs = [x for x in recs if x.get('_type') not in ('account','user')]
     targets = defaultdict(list)
     [targets[target].append(msg) for target,msg in parse_records(recs)]
-    dispatch(targets)
+    if len(targets)>0:
+        dispatch(targets)
 
 
 def api_gateway_handler(event, context):
