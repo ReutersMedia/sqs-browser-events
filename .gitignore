@@ -10,3 +10,4 @@ RELEASE-VERSION
 .serverless
 node_modules
 gp-events.iml
+sqs-browser-events.iml

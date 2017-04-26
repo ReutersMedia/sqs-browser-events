@@ -38,13 +38,8 @@ def api_gateway_handler(event, context):
             user_id = int(path_p['userId'])
             msg_id_list = path_p['messageId'].split(',')
             msg_status_d = dynamo_sessions.set_messages_read(user_id, msg_id_list)
-            if is_set:
-                return common.gen_json_resp({'success':True,
-                                             'messages_receipted': msg_status_d})
-            else:
-                return common.gen_json_resp({'success':False,
-                                             'message':"not found"},
-                                            code='404')
+            return common.gen_json_resp({'success':True,
+                                         'messages_receipted': msg_status_d})
         else:
             start = parse_tstamp(qsp,'start')
             end = parse_tstamp(qsp,'end')
