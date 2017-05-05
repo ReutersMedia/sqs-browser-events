@@ -29,19 +29,19 @@ class DispatcherException(Exception):
 def send_to_sqs_handler(q_batch):
     try:
         # flatten
-        msg_list = [(sqs_url,aes_key,msg_list) for (sqs_url,aes_key),msg_list in q_batch]
+        msg_list = [(sqs_url,aes_key,mlist) for (sqs_url,aes_key),mlist in q_batch]
         if len(msg_list)==0:
-            return True
+            return []
         session = boto3.session.Session()
         c = session.client('lambda')
         c.invoke(FunctionName=os.getenv('SQS_SENDER_LAMBDA'),
                  Payload=json.dumps({'msg_list':msg_list},cls=common.DecimalEncoder),
                  InvocationType='Event')
         LOGGER.info("Dispatched {0} message groups to SQS sender lambda".format(len(msg_list)))
+        return [x[0] for x in msg_list]
     except:
         LOGGER.exception("Unable to send to sqs batch handler")
-        return False
-    return True
+        return []
 
 def parse_id(path_p,field):
     try:
@@ -92,6 +92,12 @@ def get_sessions_for_target(target):
                                   user_id=target[2],
                                   max_expired_age=86400)
 
+def check_save_history(msg):
+    # check whether we should save a message to history
+    if not isinstance(msg,dict):
+        return True
+    return '_sqs_only' not in msg
+
 
 def dispatch(msg_d):
     # look up queues
@@ -100,14 +106,22 @@ def dispatch(msg_d):
     tnow = time.time()
     msg_type_cnt = defaultdict(int)
     for target,msg_list in msg_d.iteritems():
+        t_account,t_session,t_user = target
         for m in msg_list:
             msg_type_cnt[m.get('_type','None')] += 1
-        for queue in get_sessions_for_target(target):
+        target_queues = get_sessions_for_target(target)
+        if len(target_queues)==0 and t_user is not None:
+            # have a specific user
+            # store even if no messages
+            # only store messages that aren't flagged for _sqs_only
+            user_d[t_user].extend([x for x in msg_list if check_save_history(x)])
+        for queue in target_queues:
             # only send to SQS if session is not expired
             if int(queue['expires']) > tnow:
                 queue_d[(queue['sqsUrl'],queue['aesKey'])].extend(msg_list)
-            # but accumulate user messages
-            user_d[int(queue['userId'])].extend(msg_list)
+            # accumulate user messages
+            user_d[int(queue['userId'])].extend([x for x in msg_list if check_save_history(x)])
+        
     if len(user_d)==0 and len(queue_d)==0:
         return []
     msg_type_info = dict([('_msgcount_'+k,v) for k,v in msg_type_cnt.iteritems()])
@@ -116,17 +130,29 @@ def dispatch(msg_d):
     q_tp = ThreadPool(20)
     u_tp = ThreadPool(20)
     try:
-        queue_batches = get_dict_batches(queue_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
-        queue_r = q_tp.map_async(lambda x: send_to_sqs_handler(x), queue_batches)
-        user_batches = get_dict_batches(user_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
-        user_r = u_tp.map_async(lambda x: add_user_history(x), user_batches)
-        user_r.wait()
-        queue_r.wait()
-        sqs_urls = queue_r.get()
+        if len(queue_d) > 0:
+            queue_batches = get_dict_batches(queue_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
+            queue_r = q_tp.map_async(lambda x: send_to_sqs_handler(x), queue_batches)
+        else:
+            queue_r = None
+        if len(user_d) > 0:
+            user_batches = get_dict_batches(user_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
+            user_r = u_tp.map_async(lambda x: add_user_history(x), user_batches)
+        else:
+            user_r = None
+        if user_r is not None:
+            user_r.wait()
+        if queue_r is not None:
+            queue_r.wait()
+            sqs_urls = queue_r.get()
+        else:
+            sqs_urls = []
     finally:
         q_tp.close()
         u_tp.close()
-    return sqs_urls
+    flat_sqs_urls = []
+    [ flat_sqs_urls.extend(x) for x in sqs_urls ]
+    return flat_sqs_urls
 
 
 def get_message_target(m):
@@ -154,7 +180,7 @@ def parse_records(records):
                 LOGGER.info("MessageId={0}, account={1}, user={2}, session={3}".format(r['messageId'],t[0],t[2],t[1]))
                 yield (t,r)
             else:
-                LOGGER.error("Unrecognized record, is not from Kinesis: {0!r}".format(r))
+                LOGGER.error("Unrecognized record, is not from Kinesis: {0!r}".format(rec))
         except:
             LOGGER.exception("Unable to dispatch record {0!r}".format(rec))
 
@@ -182,8 +208,11 @@ def api_gateway_handler(event, context):
         msg = qsp.copy()
         if path_p is not None:
             msg.update(path_p)
+            if 'userId' in path_p:
+                msg['userId'] = int(path_p['userId'])
         if 'messageId' not in msg:
             msg['messageId'] = base64.urlsafe_b64encode(hashlib.sha1(str(time.time())+repr(msg)).digest())
+        LOGGER.info("notify message: {0!r}".format(msg))
         r = dispatch({get_message_target(msg):[msg]})
         return common.gen_json_resp({'success':True,
                                      'sqsUrls':r})

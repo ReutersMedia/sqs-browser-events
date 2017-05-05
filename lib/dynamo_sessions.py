@@ -60,9 +60,20 @@ def set_messages_read(user_id, msg_id_list, n_workers=30):
         for future in concurrent.futures.as_completed(future_to_msg_id):
             msg_id = future_to_msg_id[future]
             msg_update_status[msg_id] = future.result()
-    return msg_update_status
+    return [k for k,v in msg_update_status.iteritems() if v]
 
-
+def set_messages_read_asof(user_id, asof):
+    LOGGER.info("read-receipting messages as of {0} for user_id {1}".format(asof,user_id))
+    # get list of messageIds
+    q = {'KeyConditionExpression': Key('userId').eq(user_id),
+         'FilterExpression': Attr('created').lte(asof) & Attr('is_read').ne(1),
+         'Limit':1000,
+         'Select':'SPECIFIC_ATTRIBUTES',
+         'ProjectionExpression':'messageId'}
+    r = collect_results(get_history_table().query,q)
+    msg_ids = [x['messageId'] for x in r]
+    return set_messages_read(user_id, msg_ids)
+        
 def write_user_history(item_batch):
     # use a consistent timestamp (tnow) so that any reprocessing results in overwriting if
     # items are inserted multiple times

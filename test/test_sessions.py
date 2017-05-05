@@ -76,6 +76,7 @@ class TestSessions(unittest.TestCase):
         c.put_record(StreamName=self.props['EVENT_STREAM'],
                      Data=json.dumps({'accountId':ac_id1,
                                       'sessionId':session1b,
+                                      '_sqs_only':1,
                                       'msg':'test2-k'}),
                      PartitionKey=str(ac_id1))
         # msg to session2a

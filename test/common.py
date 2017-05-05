@@ -6,7 +6,7 @@ import pyaes
 import base64
 
 
-def get_msgs(session):
+def get_msgs(session,raw=False):
     sqs_c = boto3.client('sqs',
                          aws_access_key_id=session['accessKey'],
                          aws_secret_access_key=session['secretKey'],
@@ -27,4 +27,7 @@ def get_msgs(session):
             msgs.append(json.loads(dec_m))
             sqs_c.delete_message(QueueUrl=session['sqsUrl'],
                                  ReceiptHandle=m['ReceiptHandle'])
-    return sorted([x['msg'] for x in msgs])
+    if raw:
+        return sorted(msgs)
+    else:
+        return sorted([x['msg'] for x in msgs])

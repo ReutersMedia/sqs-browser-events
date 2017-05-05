@@ -44,6 +44,7 @@ provider:
         - kinesis:GetShardIterator
         - kinesis:DescribeStream
         - kinesis:ListStreams
+        - kinesis:PutRecord
       Resource: "*"
     - Effect: Allow
       Action:
@@ -67,6 +68,8 @@ provider:
     SESSION_TTL: 86400
     USER_MESSAGE_TTL: 86400
     USER_HISTORY_ADDER_LAMBDA: ${self:custom.userHistoryAdder}
+    SEND_READ_RECEIPTS_VIA_SQS: 1
+    EVENT_STREAM: ${self:custom.browserEventStream}
   include:
     - lib/**
 custom:
@@ -156,6 +159,12 @@ functions:
       - http:
           method: get
           path: /messages/set-read/user/{userId}/message/{messageId}
+      - http:
+          method: post
+          path: /messages/set-read/user/{userId}
+      - http:
+          method: get
+          path: /messages/set-read/user/{userId}/asof/{tstamp}
   DispatcherAPI:
     handler: dispatcher.api_gateway_handler
     name: ${opt:env}-sqs-browser-dispatcher-api
