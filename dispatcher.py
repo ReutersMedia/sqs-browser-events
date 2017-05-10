@@ -65,9 +65,10 @@ def add_user_history(user_batch):
     return True
 
 # some buffer for overhead
+# to accomodate AWS Lambda 128K max event size
 MAX_MESSAGE_SIZE = 100000
 
-def get_dict_batches(queue_d,bsize=25,max_msg_list_size=10):
+def get_dict_batches(queue_d,bsize=25,max_msg_list_size=100):
     cur_batch = defaultdict(list)
     batch_size = 0
     for q,msg_list in queue_d.iteritems():
@@ -99,7 +100,8 @@ def check_save_history(msg):
     return '_sqs_only' not in msg
 
 
-def dispatch(msg_d):
+def dispatch(msg_d, exp_time):
+    LOGGER.info("Dispatching messages, expires in {0}".format(exp_time-time.time()))
     # look up queues
     queue_d = defaultdict(list)
     user_d = defaultdict(list)
@@ -121,30 +123,46 @@ def dispatch(msg_d):
                 queue_d[(queue['sqsUrl'],queue['aesKey'])].extend(msg_list)
             # accumulate user messages
             user_d[int(queue['userId'])].extend([x for x in msg_list if check_save_history(x)])
-        
+    batch_size = int(os.getenv('DISPATCHER_BATCH_SIZE',20))
     if len(user_d)==0 and len(queue_d)==0:
         return []
+    if len(queue_d)>1000:
+        # very large queue size
+        # need larger batches
+        batch_size = max(int(len(queue_d) / 100),batch_size)
+        LOGGER.info("Large number of queues to transmit, increasing batch size to {0}".format(batch_size))
     msg_type_info = dict([('_msgcount_'+k,v) for k,v in msg_type_cnt.iteritems()])
     msg_type_info['dispatchEventCount'] = sum([len(x) for x in user_d.itervalues()])
-    LOGGER.info(json.dumps(msg_type_info))
     q_tp = ThreadPool(20)
     u_tp = ThreadPool(20)
     try:
         if len(queue_d) > 0:
-            queue_batches = get_dict_batches(queue_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
+            queue_batches = get_dict_batches(queue_d,
+                                             bsize=batch_size,
+                                             max_msg_list_size=int(os.getenv('MAX_MSG_LIST_LENGTH',50)))
             queue_r = q_tp.map_async(lambda x: send_to_sqs_handler(x), queue_batches)
         else:
             queue_r = None
         if len(user_d) > 0:
-            user_batches = get_dict_batches(user_d,bsize=int(os.getenv('DISPATCHER_BATCH_SIZE',20)))
+            user_batches = get_dict_batches(user_d,
+                                            bsize=batch_size,
+                                            max_msg_list_size=int(os.getenv('MAX_MSG_LIST_LENGTH',50)))
             user_r = u_tp.map_async(lambda x: add_user_history(x), user_batches)
         else:
             user_r = None
         if user_r is not None:
-            user_r.wait()
+            user_r.wait(max(exp_time - time.time(),0))
+            if not user_r.ready():
+                LOGGER.error("Timeout waiting on user history delivery")
+                u_tp.terminate()
         if queue_r is not None:
-            queue_r.wait()
-            sqs_urls = queue_r.get()
+            queue_r.wait(max(exp_time - time.time(),0))
+            if not queue_r.ready():
+                LOGGER.error("Timeout waiting on queue delivery")
+                q_tp.terminate()
+                sqs_urls = []
+            else:
+                sqs_urls = queue_r.get()
         else:
             sqs_urls = []
     finally:
@@ -194,8 +212,9 @@ def lambda_handler(event, context):
     recs = [x for x in recs if x.get('_type') not in ('account','user')]
     targets = defaultdict(list)
     [targets[target].append(msg) for target,msg in parse_records(recs)]
+    exp_time = time.time() + context.get_remaining_time_in_millis()/1000.0 - 2.0
     if len(targets)>0:
-        dispatch(targets)
+        dispatch(targets,exp_time)
 
 
 def api_gateway_handler(event, context):
@@ -213,7 +232,9 @@ def api_gateway_handler(event, context):
         if 'messageId' not in msg:
             msg['messageId'] = base64.urlsafe_b64encode(hashlib.sha1(str(time.time())+repr(msg)).digest())
         LOGGER.info("notify message: {0!r}".format(msg))
-        r = dispatch({get_message_target(msg):[msg]})
+        max_wait = int(context.get_remaining_time_in_millis()/1000) - 2
+        exp_time = time.time() + context.get_remaining_time_in_millis()/1000.0 - 2.0
+        r = dispatch({get_message_target(msg):[msg]},exp_time)
         return common.gen_json_resp({'success':True,
                                      'sqsUrls':r})
     except:

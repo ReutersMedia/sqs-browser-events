@@ -60,12 +60,12 @@ provider:
     SESSION_TABLE_ACCOUNT_GSI: ${self:custom.sessionTable}-gsi-account
     COGNITO_IDENTITY_POOL: ${opt:poolname, self:provider.defPoolName}
     SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
-    SESSION_INACTIVE_PURGE_SEC: 604800
     HISTORY_TABLE: ${self:custom.historyTable}
     SQS_SENDER_LAMBDA: ${self:custom.sqsSender}
-    DISPATCHER_BATCH_SIZE: 5
-    SQS_MESSAGE_RETENTION_PERIOD: 7200
-    SESSION_TTL: 86400
+    DISPATCHER_BATCH_SIZE: 20
+    MAX_MSG_LIST_LENGTH: 50
+    SQS_MESSAGE_RETENTION_PERIOD: 3600
+    SESSION_TTL: 3600
     USER_MESSAGE_TTL: 86400
     USER_HISTORY_ADDER_LAMBDA: ${self:custom.userHistoryAdder}
     SEND_READ_RECEIPTS_VIA_SQS: 1
