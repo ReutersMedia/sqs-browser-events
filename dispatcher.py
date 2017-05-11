@@ -189,11 +189,16 @@ def k_seq(x):
 def parse_records(records):
     for rec in records:
         try:
-            if 'kinesis' in rec:
-                r = json.loads(base64.b64decode(rec['kinesis']['data']))
-                if 'messageId' not in r:
-                    # add message ID derived from Kinesis event
-                    r['messageId'] = base64.urlsafe_b64encode(hashlib.sha1(rec['eventID']).digest())
+            if 'kinesis' in rec or '_type' in rec:
+                if 'kinesis' in rec:
+                    r = json.loads(base64.b64decode(rec['kinesis']['data']))
+                    if 'messageId' not in r:
+                        # add message ID derived from Kinesis event
+                        r['messageId'] = base64.urlsafe_b64encode(hashlib.sha1(rec['eventID']).digest())
+                else:
+                    r = rec
+                    if 'messageId' not in r:
+                        r['messageId'] = base64.urlsafe_b64encode(hashlib.sha1(json.dumps(rec)).digest())
                 t = get_message_target(r)
                 LOGGER.info("MessageId={0}, account={1}, user={2}, session={3}".format(r['messageId'],t[0],t[2],t[1]))
                 yield (t,r)

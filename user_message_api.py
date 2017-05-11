@@ -54,8 +54,9 @@ def chunks(l, n):
 def create_msg_read_receipt_events(user_id,msg_id_list):
     if len(msg_id_list)==0:
         return
-    msg_batches = chunks(msg_id_list,300)
-    m_tp = ThreadPool(min(20,1+len(msg_id_list)/300))
+    chunk_size = int(os.getenv('READ_RECEIPT_ADDER_CHUNK_SIZE',50))
+    msg_batches = chunks(msg_id_list,chunk_size)
+    m_tp = ThreadPool(min(20,1+len(msg_id_list)/chunk_size))
     m_tp.map(lambda x: send_read_receipt_event(user_id,x),msg_batches)
     m_tp.close()
     
@@ -93,17 +94,17 @@ def api_gateway_handler(event, context):
             else:
                 msg_status_d = dynamo_sessions.set_messages_read(user_id, msg_id_list)
                 # send msg-receited updates to any SQS queues for the user
-                if os.getenv('SEND_READ_RECEIPTS_VIA_SQS','').lower() in ('1','true','yes'):
+                if os.getenv('SEND_READ_RECEIPTS_VIA_SQS','1').lower().strip() in ('1','true','yes'):
                     LOGGER.info("Generating read-receipt message for user_id={0}".format(user_id))
                     m = {'userId':user_id,
                          '_type':'message-read-receipt',
                          'messages-receipted': msg_status_d,
                          '_sqs_only': 1}
                     try:
-                        c = boto3.client('kinesis')
-                        c.put_record(StreamName=os.getenv('EVENT_STREAM'),
-                                     Data=json.dumps(m,cls=common.DecimalEncoder),
-                                     PartitionKey=str(user_id))
+                        c = boto3.client('lambda')
+                        c.invoke(FunctionName=os.getenv('DISPATCHER_LAMBDA'),
+                                 Payload=json.dumps({'Records':[m]},cls=common.DecimalEncoder),
+                                 InvocationType='Event')
                     except:
                         LOGGER.exception("Unable to push read-receipt message for user_id={0}".format(user_id))
                 return common.gen_json_resp({'success':True,

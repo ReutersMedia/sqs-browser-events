@@ -34,7 +34,7 @@ def lambda_handler(event, context):
         msg_id_list = event['user_msg_read_receipts']
         LOGGER.info("Setting {0} messages read for user_id {1}".format(len(msg_id_list),user_id))
         receipted_msg_ids = dynamo_sessions.set_messages_read(user_id,msg_id_list)
-        if os.getenv('SEND_READ_RECEIPTS_VIA_SQS','').lower() in ('1','true','yes'):
+        if os.getenv('SEND_READ_RECEIPTS_VIA_SQS','1').lower().strip() in ('1','true','yes'):
             # send msg-receited updates to any SQS queues for the user
             LOGGER.info("Generating read-receipt message for user_id={0}".format(user_id))
             m = {'userId':user_id,
@@ -42,9 +42,9 @@ def lambda_handler(event, context):
                  'messages-receipted': receipted_msg_ids,
                  '_sqs_only': 1}
             try:
-                c = boto3.client('kinesis')
-                c.put_record(StreamName=os.getenv('EVENT_STREAM'),
-                             Data=json.dumps(m,cls=common.DecimalEncoder),
-                             PartitionKey=str(user_id))
+                c = boto3.client('lambda')
+                c.invoke(FunctionName=os.getenv('DISPATCHER_LAMBDA'),
+                         Payload=json.dumps({'Records':[m]},cls=common.DecimalEncoder),
+                         InvocationType='Event')
             except:
                 LOGGER.exception("Unable to push read-receipt message for user_id={0}".format(user_id))

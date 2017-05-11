@@ -62,6 +62,7 @@ provider:
     SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
     HISTORY_TABLE: ${self:custom.historyTable}
     SQS_SENDER_LAMBDA: ${self:custom.sqsSender}
+    DISPATCHER_LAMBDA: ${self:custom.eventDispatcher}
     DISPATCHER_BATCH_SIZE: 20
     MAX_MSG_LIST_LENGTH: 50
     SQS_MESSAGE_RETENTION_PERIOD: 3600
@@ -70,6 +71,7 @@ provider:
     USER_HISTORY_ADDER_LAMBDA: ${self:custom.userHistoryAdder}
     SEND_READ_RECEIPTS_VIA_SQS: 1
     EVENT_STREAM: ${self:custom.browserEventStream}
+    READ_RECEIPT_ADDER_CHUNK_SIZE: 50
   include:
     - lib/**
 custom:
