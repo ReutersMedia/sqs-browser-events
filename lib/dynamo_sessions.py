@@ -45,8 +45,8 @@ def set_message_read(user_id, msg_id):
         return True
     except botocore.exceptions.ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            LOGGER.info("Duplicate is_read setting for user_id={0}, msg_id={1}".format(user_id,msg_id))
-            return True
+            LOGGER.info("Message already read for user_id={0}, msg_id={1}".format(user_id,msg_id))
+            return False
         else:
             LOGGER.exception("Eror updating read setting for user_id={0}, msg_id={1}".format(user_id,msg_id))
             return False
@@ -62,8 +62,7 @@ def set_messages_read(user_id, msg_id_list, n_workers=30):
             msg_update_status[msg_id] = future.result()
     return [k for k,v in msg_update_status.iteritems() if v]
 
-def set_messages_read_asof(user_id, asof):
-    LOGGER.info("read-receipting messages as of {0} for user_id {1}".format(asof,user_id))
+def get_unread_message_ids_asof(user_id, asof):
     # get list of messageIds
     q = {'KeyConditionExpression': Key('userId').eq(user_id),
          'FilterExpression': Attr('created').lte(asof) & Attr('is_read').ne(1),
@@ -72,7 +71,7 @@ def set_messages_read_asof(user_id, asof):
          'ProjectionExpression':'messageId'}
     r = collect_results(get_history_table().query,q)
     msg_ids = [x['messageId'] for x in r]
-    return set_messages_read(user_id, msg_ids)
+    return msg_ids
         
 def write_user_history(item_batch):
     # use a consistent timestamp (tnow) so that any reprocessing results in overwriting if

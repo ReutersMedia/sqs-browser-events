@@ -214,11 +214,13 @@ Optionally a `_sqs_only` field can be set in the message, and if the field is pr
 In some cases it is useful to retrieve the message history for a user, for example when they are logging after being absent for some time.  Messages will accumulate depending on the USER_MESSAGE_TTL parameter set in serverless, by default 24 hours.  When messages are dispatched, a list of unique userIDs receiving the message is compiled, and those messages are put into a notification history table in DynamoDB.  If a user has several active sessions, the message is inserted for that userId only once.  A user's messages can be retrieved and read-receipted using an API Gateway authenticated by IAM.  
 
 * `/messages/user/[userId]` (GET): retrieve messages for a user, optionally accepting a `start` and/or and `end` parameter in epoch seconds.  If a message has been read-receipted, an `is_read` parameter will be present and equal to 1, otherwise it will be present and equal to 0.
-* `/messages/set-read/user/[userId]/message/[messageId]` (GET): set a message as read.  This updates the 'is_read' parameter to 1 from its initial value of 0.  The messageId can be a comma-delimited list of IDs for the same user.
+* `/messages/set-read/user/[userId]/message/[messageId]` (GET): set a message as read.  This updates the 'is_read' parameter to 1 from its initial value of 0.  The messageId can be a comma-delimited list of IDs for the same user.  
 * `/messages/set-read/user/[userId]/asof/[timestamp]` (GET): set all messages as of the given timestamp in Epoch seconds to read.  This updates the 'is_read' parameter to 1 from its initial value of 0.  The messageId can be a comma-delimited list of IDs for the same user.
 * `/messages/set-read/user/[userId]` (POST): set a collection of message as read.  The body should be a JSON-encoded list of messageIds.  This updates the 'is_read' parameter to 1 from its initial value of 0.  The messageId can be a comma-delimited list of IDs for the same user.
 
 Read receipts themselves generate SQS queue messages, with a list of messageID's as the body, as shown below.  These read-receipt messages are only posted to SQS, and not to the user history.  This allows updating the read-status of other sessions for the connected user.
+
+Both of the read-receipt endpoints also accept an "async" query parameter.  If it is present, updating the database with the read receipt will be performed asynchronously, usually visible within a few seconds.  This is useful when receipting a large number of messages.  The database updates will be batched into groups of 300 message IDs.
 
 ```
 {
