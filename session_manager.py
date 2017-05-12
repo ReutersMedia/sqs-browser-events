@@ -6,6 +6,9 @@ import time
 import os
 import sys
 import json
+import random
+
+from multiprocessing.pool import ThreadPool
 
 import boto3
 import botocore.errorfactory
@@ -19,6 +22,8 @@ import dynamo_sessions
 import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
+
+QUEUE_CREATE_TIME_DIVISOR = 10000
 
 class SessionManagerException(Exception):
     pass
@@ -103,8 +108,12 @@ def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None, msg_rete
     # use hash to generate queue name based on account, session
     # this ensures it is well-distributed, which will be useful when
     # we need to scroll through a large number of queues
+
+    # also encode creation time / 10000, to roughly determine age
+    # useful later for cleanup
     queue_name = os.getenv('SQS_QUEUE_PREFIX') + '-' + \
-                 base64.urlsafe_b64encode(hashlib.sha1("{0}-{1}".format(account_id,session_id)).digest()).replace('=','')
+                 base64.urlsafe_b64encode(hashlib.sha1("{0}-{1}".format(account_id,session_id)).digest()).replace('=','') + \
+                 '-' + str(int(time.time()/QUEUE_CREATE_TIME_DIVISOR))
     # unix /dev/random has more entropy than /dev/urandom, and python random
     with open('/dev/random','rb') as f_rand:
         aes_key = f_rand.read(32)
@@ -140,8 +149,11 @@ def destroy_session(account_id, user_id, session_id):
     if len(d)>0:
         sqs_url = d[0]['sqsUrl']
         c = boto3.client('sqs')
-        c.delete_queue(QueueUrl=sqs_url)
-        LOGGER.info("Removed queue {0}".format(sqs_url))
+        try:
+            c.delete_queue(QueueUrl=sqs_url)
+            LOGGER.info("Removed queue {0}".format(sqs_url))
+        except:
+            LOGGER.warn("Unable to remove queue {0}".format(sqs_url))
         LOGGER.info("Destroying session {0}, user {1}".format(session_id,user_id))
         dynamo_sessions.destroy(account_id, user_id, session_id)
         return {"success":True}
@@ -210,11 +222,21 @@ def cleanup_queues():
         prefixes = [ prefix+i for i in SQS_NAME_CHARS ]
     else:
         prefixes = [ prefix ]
+    db_queues = set(db_queues)
+    random.shuffle(prefixes) # prevent cold spots
     return sum([remove_unused_queues(x,db_queues) for x in prefixes])
 
 
+def parse_queue_age(q):
+    try:  
+        create_dt = q.rsplit('-',1)[-1]
+        if create_dt.isdigit():
+            return time.time() - int(create_dt)*QUEUE_CREATE_TIME_DIVISOR
+    except:
+        LOGGER.exception("Error parsing queue name {0}".format(x))
+    return None
+
 def remove_unused_queues(sqs_name_prefix,db_queues):
-    db_queues = set(db_queues)
     c = boto3.client('sqs')
     if sqs_name_prefix is None:
         r = c.list_queues()
@@ -225,15 +247,25 @@ def remove_unused_queues(sqs_name_prefix,db_queues):
         LOGGER.info("No queues to purge")
         return
     # delete ones in aws_queues that aren't in db_queues
+    n_del = 0
     def del_q(x):
-        LOGGER.info("Deleting queue {0}".format(x))
         try:
+            # may have been created since we pulled the list of active queues
+            # so check that the queue isn't too new
+            q_age = parse_queue_age(x)
+            if q_age is not None and q_age < 20000 and q_age > -20000:
+                return
+            LOGGER.info("Deleting queue {0}, age is {1}".format(x,q_age))
             c.delete_queue(QueueUrl=q)
-            return 1
+            n_del += 1
         except:
-            LOGGER.exception("Error removing queue {0}".format(x))
-            return 0
-    return sum([ del_q(q) for q in aws_queues if q not in db_queues ])
+            LOGGER.warn("Error removing queue {0}".format(x))
+    q_del_list = [q for q in aws_queues if q not in db_queues]
+    tp = ThreadPool(20)
+    tp.map(del_q, q_del_list)
+    tp.close()
+    return n_del
+
 
 def gen_json_resp(d, code='200'):
     return {'statusCode': code,
