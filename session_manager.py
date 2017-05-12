@@ -236,6 +236,8 @@ def parse_queue_age(q):
         LOGGER.exception("Error parsing queue name {0}".format(x))
     return None
 
+
+
 def remove_unused_queues(sqs_name_prefix,db_queues):
     c = boto3.client('sqs')
     if sqs_name_prefix is None:
@@ -255,11 +257,18 @@ def remove_unused_queues(sqs_name_prefix,db_queues):
             q_age = parse_queue_age(x)
             if q_age is not None and q_age < 20000 and q_age > -20000:
                 return
-            LOGGER.info("Deleting queue {0}, age is {1}".format(x,q_age))
-            c.delete_queue(QueueUrl=q)
+            session = boto3.session.Session()
+            sqs_c = session.client('sqs')
+            sqs_c.delete_queue(QueueUrl=q)
+            LOGGER.info("Deleted queue {0}, age is {1}".format(x,q_age))
             n_del += 1
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == 'AWS.SimpleQueueService.NonExistentQueue':
+                LOGGER.info("Attempted to remove queue, does not exist: {0}".format(x))
+            else:
+                LOGGER.exception("Error removing queue {0}".format(x))
         except:
-            LOGGER.warn("Error removing queue {0}".format(x))
+            LOGGER.exception("Error removing queue {0}".format(x))
     q_del_list = [q for q in aws_queues if q not in db_queues]
     tp = ThreadPool(20)
     tp.map(del_q, q_del_list)
