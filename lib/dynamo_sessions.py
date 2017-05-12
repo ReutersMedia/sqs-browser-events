@@ -171,7 +171,6 @@ def get_user_messages(user_id,start_t=None,end_t=None,type_filter=None):
     elif end_t is not None:
         q['FilterExpression'] = Attr('created').lte(end_t)
     if type_filter is not None:
-        LOGGER.info("Filtering by type: {0}".format(type_filter))
         type_exp = Attr('_type').is_in(type_filter)
         if 'FilterExpression' in q:
             q['FilterExpression'] = q['FilterExpression'] & type_exp
