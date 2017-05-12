@@ -4,6 +4,7 @@ import os
 import sys
 import base64
 import json
+import threading
 
 from multiprocessing.pool import ThreadPool
 
@@ -18,6 +19,14 @@ import boto3
 import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
+
+
+_thread_local = threading.local()
+
+def get_session():
+    if not hasattr(_thread_local,'boto_session'):
+        _thread_local.boto_session = boto3.session.Session()
+    return _thread_local.boto_session
 
 
 class RequestFormatException(Exception):
@@ -36,7 +45,7 @@ def parse_tstamp(qsp,field):
 
 def send_read_receipt_event(user_id,msg_id_list):
     try:
-        session = boto3.session.Session()
+        session = get_session()
         c = session.client('lambda')
         c.invoke(FunctionName=os.getenv('USER_HISTORY_ADDER_LAMBDA'),
                  Payload=json.dumps({'user_id':user_id,

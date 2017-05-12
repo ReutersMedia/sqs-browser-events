@@ -2,6 +2,7 @@ import os
 import time
 import decimal
 import concurrent.futures
+import threading
 
 import boto3
 
@@ -12,6 +13,14 @@ import botocore.exceptions
 import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
+
+_thread_local = threading.local()
+
+def get_session():
+    if not hasattr(_thread_local,'boto_session'):
+        _thread_local.boto_session = boto3.session.Session()
+    return _thread_local.boto_session
+
 
 import common
 
@@ -24,7 +33,7 @@ def get_session_table():
 
 def get_history_table(new_session=False):
     if new_session:
-        session = boto3.session.Session()
+        session = get_session()
         dynamodb = session.resource('dynamodb')
     else:
         dynamodb = boto3.resource('dynamodb')
@@ -45,7 +54,7 @@ def set_message_read(user_id, msg_id):
         return True
     except botocore.exceptions.ClientError as e:
         if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            LOGGER.info("Message already read for user_id={0}, msg_id={1}".format(user_id,msg_id))
+            LOGGER.info("Message already read user_id={0}, msg_id={1}".format(user_id,msg_id))
             return False
         else:
             LOGGER.exception("Eror updating read setting for user_id={0}, msg_id={1}".format(user_id,msg_id))
@@ -78,7 +87,7 @@ def write_user_history(item_batch):
     # items are inserted multiple times
     try:
         hist_table = os.getenv('HISTORY_TABLE')
-        session = boto3.session.Session()
+        session = get_session()
         c = session.client('dynamodb')
         r = c.batch_write_item(RequestItems={ hist_table: item_batch })
         unproc = r.get('UnprocessedItems')

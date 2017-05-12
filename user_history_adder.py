@@ -16,6 +16,8 @@ import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 
+
+
 def lambda_handler(event, context):
     # create list of user_id,msg
     if 'user_msg_list' in event:

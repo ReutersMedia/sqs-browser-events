@@ -23,6 +23,14 @@ import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 
+_thread_local = threading.local()
+
+def get_session():
+    if not hasattr(_thread_local,'boto_session'):
+        _thread_local.boto_session = boto3.session.Session()
+    return _thread_local.boto_session
+
+
 class DispatcherException(Exception):
     pass
 
@@ -32,7 +40,7 @@ def send_to_sqs_handler(q_batch):
         msg_list = [(sqs_url,aes_key,mlist) for (sqs_url,aes_key),mlist in q_batch]
         if len(msg_list)==0:
             return []
-        session = boto3.session.Session()
+        session = get_session()
         c = session.client('lambda')
         c.invoke(FunctionName=os.getenv('SQS_SENDER_LAMBDA'),
                  Payload=json.dumps({'msg_list':msg_list},cls=common.DecimalEncoder),
@@ -53,7 +61,7 @@ def add_user_history(user_batch):
     if len(user_batch)==0:
         return True
     try:
-        session = boto3.session.Session()
+        session = get_session()
         c = session.client('lambda')
         c.invoke(FunctionName=os.getenv('USER_HISTORY_ADDER_LAMBDA'),
                  Payload=json.dumps({'user_msg_list':user_batch},cls=common.DecimalEncoder),

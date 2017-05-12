@@ -23,6 +23,14 @@ import logging
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 
+_thread_local = threading.local()
+
+def get_session():
+    if not hasattr(_thread_local,'boto_session'):
+        _thread_local.boto_session = boto3.session.Session()
+    return _thread_local.boto_session
+
+
 def encode_msg(aes_key,m):
     m_json = json.dumps(m,cls=common.DecimalEncoder)
     init_ctr = random.randint(0,9999999999) # OK if crappy python pseudo-random, only to prevent dupe blocks
@@ -36,7 +44,7 @@ def send_to_sqs(payload):
         aes_key = base64.b64decode(aes_key_b64)
         msg_batch = [ {"Id":str(i),"MessageBody":encode_msg(aes_key,x)} for i,x in enumerate(msg_list) ]
         LOGGER.info(json.dumps({'sqsMessageCount':len(msg_batch)}))
-        session = boto3.session.Session()
+        session = get_session()
         c = session.client('sqs')
         n_retries = 0
         while True:

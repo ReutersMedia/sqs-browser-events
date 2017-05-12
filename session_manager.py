@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import random
+import threading
 
 from multiprocessing.pool import ThreadPool
 
@@ -24,6 +25,8 @@ LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 
 QUEUE_CREATE_TIME_DIVISOR = 10000
+
+_thread_local = threading.local()
 
 class SessionManagerException(Exception):
     pass
@@ -205,11 +208,11 @@ def create_session(account_id, user_id, session_id, restrict_ip=None, msg_retent
 SQS_NAME_CHARS = [ chr(x) for x in range(97,123)+range(65,91)+range(48,58) ] + ['-','_']
 
 def cleanup_queues():
-    prefix = os.getenv('SQS_QUEUE_PREFIX')
-    if len(prefix)==0:
+    prefix = os.getenv('SQS_QUEUE_PREFIX')+'-'
+    if len(prefix)<=1:
         LOGGER.error("Queue name prefix missing, refusing to delete")
         return
-    db_queues = dynamo_sessions.get_all_sqs_urls()
+    db_queues = set(dynamo_sessions.get_all_sqs_urls())
     # SQS list_queues is limited to 1000, so may need to split up the queries.
     # we only need to split up if db_queues is very long.
     # if db_queues is short and actual number of queues is > 1000, we will delete
@@ -222,7 +225,6 @@ def cleanup_queues():
         prefixes = [ prefix+i for i in SQS_NAME_CHARS ]
     else:
         prefixes = [ prefix ]
-    db_queues = set(db_queues)
     random.shuffle(prefixes) # prevent cold spots
     return sum([remove_unused_queues(x,db_queues) for x in prefixes])
 
@@ -237,19 +239,19 @@ def parse_queue_age(q):
     return None
 
 
-
 def remove_unused_queues(sqs_name_prefix,db_queues):
     c = boto3.client('sqs')
     if sqs_name_prefix is None:
+        LOGGER.info("Querying all SQS queues")
         r = c.list_queues()
     else:
+        LOGGER.info("Querying SQS queues with prefix = '{0}'".format(sqs_name_prefix))
         r = c.list_queues(QueueNamePrefix=sqs_name_prefix)
     aws_queues = r.get('QueueUrls')
     if aws_queues == None:
         LOGGER.info("No queues to purge")
         return
     # delete ones in aws_queues that aren't in db_queues
-    n_del = 0
     def del_q(x):
         try:
             # may have been created since we pulled the list of active queues
@@ -257,14 +259,14 @@ def remove_unused_queues(sqs_name_prefix,db_queues):
             q_age = parse_queue_age(x)
             if q_age is not None and q_age < 20000 and q_age > -20000:
                 return
-            session = boto3.session.Session()
-            sqs_c = session.client('sqs')
-            sqs_c.delete_queue(QueueUrl=q)
-            LOGGER.info("Deleted queue {0}, age is {1}".format(x,q_age))
-            n_del += 1
+            if not hasattr(_thread_local,'boto_session'):
+                _thread_local.boto_session = boto3.session.Session()
+            sqs_c = _thread_local.boto_session.client('sqs')
+            sqs_c.delete_queue(QueueUrl=x)
+            LOGGER.info("Deleted queue '{0}', age is {1}".format(x,q_age))
         except botocore.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'AWS.SimpleQueueService.NonExistentQueue':
-                LOGGER.info("Attempted to remove queue, does not exist: {0}".format(x))
+                LOGGER.info("Attempted to remove queue, does not exist: '{0}'".format(x))
             else:
                 LOGGER.exception("Error removing queue {0}".format(x))
         except:
@@ -273,7 +275,7 @@ def remove_unused_queues(sqs_name_prefix,db_queues):
     tp = ThreadPool(20)
     tp.map(del_q, q_del_list)
     tp.close()
-    return n_del
+    return len(q_del_list)
 
 
 def gen_json_resp(d, code='200'):
