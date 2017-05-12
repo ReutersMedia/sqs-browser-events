@@ -9,6 +9,7 @@ import threading
 import time
 
 import boto3
+import botocore.exceptions
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(current_path, './lib'))
@@ -51,6 +52,12 @@ def send_to_sqs(payload):
                 time.sleep(5)
             else:
                 LOGGER.error("Failed to deliver {0} messages".format(len(failures)))
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == 'AWS.SimpleQueueService.NonExistentQueue':
+            LOGGER.warn("Queue does not exist: {0}".format(sqs_url))
+            return False
+        LOGGER.exception("Unable to send to queue {0}".format(sqs_url))
+        return False
     except:
         LOGGER.exception("Unable to send to queue {0}".format(sqs_url))
         return False
