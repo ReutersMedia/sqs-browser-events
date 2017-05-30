@@ -84,19 +84,24 @@ custom:
   sqsSender: ${opt:env}-sqs-browser-sender
   userHistoryAdder: ${opt:env}-sqs-browser-user-hist-adder
   eventDispatcher: ${opt:env}-sqs-browser-event-dispatcher
-  sessionManagerCleanup: ${opt:env}-sqs-browser-session-manager-cleanup
+  sessionUpdateProcessor: ${opt:env}-sqs-browser-session-updates
   sessionManagerAPI: ${opt:env}-sqs-browser-session-manager-api
   userMessageAPI: ${opt:env}-sqs-browser-user-messages
 functions:
-  SessionManagerCleanup:
-    handler: session_manager.cleanup_lambda_handler
-    name: ${self:custom.sessionManagerCleanup}
-    memorySize: 256
+  SessionUpdateProcessor:
+    handler: session_update.lambda_handler
+    name: ${self:custom.sessionUpdateProcessor}
+    memorySize: 128
     timeout: 300
-    description: API Gateway for session cleanup, should be called periodically, version ${self:custom.version}
+    description: Listen for changes from the session table, and remove unused SQS queues, version ${self:custom.version}
     events:
-      - schedule:
-          rate: cron(15 */6 * * ? *)
+      - stream:
+          type: dynamodb
+          batchSize: 100
+          arn:
+            Fn::GetAtt:
+              - sessionTable
+              - StreamArn
   SessionManagerAPI:
     handler: session_manager.api_gateway_handler
     name: ${self:custom.sessionManagerAPI}
@@ -275,6 +280,8 @@ resources:
         ProvisionedThroughput:
           ReadCapacityUnits: 5
           WriteCapacityUnits: 5
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
     sessionManagerAPIErrorMetricFilter:
       Type: "AWS::Logs::MetricFilter"
       Properties:
@@ -324,17 +331,6 @@ resources:
       Properties:
         LogGroupName:
           Ref: EventDispatcherLogGroup
-        FilterPattern: "[ERROR]"
-        MetricTransformations:
-          -
-            MetricValue: "1"
-            MetricNamespace: "${opt:env}-SQSBrowser"
-            MetricName: "ErrorCount"
-    sessionManagerCleanupErrorMetricFilter:
-      Type: "AWS::Logs::MetricFilter"
-      Properties:
-        LogGroupName:
-          Ref: SessionManagerCleanupLogGroup
         FilterPattern: "[ERROR]"
         MetricTransformations:
           -

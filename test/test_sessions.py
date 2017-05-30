@@ -174,13 +174,11 @@ class TestSessions(unittest.TestCase):
         t = dynamodb.Table(self.props['SESSION_TABLE'])
         item = t.get_item(Key={'userId':user_id,
                                'sessionId':session1a})['Item']
-        item['expires'] = int(time.time()-86400*30)
-        # now clean, should be removed along with it's SQS url
-        self.call_gw('/cleanup')
-        time.sleep(2)
-        r = t.get_item(Key={'userId':user_id,
-                            'sessionId':session1a})
-        self.assertNotIn('Item',r)
+        t.delete_item(Key={'userId':user_id,
+                           'sessionId':session1a})
+        # takes time for lambda to pick up, and queue deletes are not instantaneous
+        time.sleep(30)
+        # check whether SQS queue still exists
         sqs_c = boto3.client('sqs')
         queues = sqs_c.list_queues(QueueNamePrefix=item['sqsQueueName'])
         self.assertNotIn('QueueUrls',queues)

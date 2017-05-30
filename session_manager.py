@@ -326,6 +326,3 @@ def api_gateway_handler(event, context):
                               'message':'error handling request'},
                              code='500')
     
-def cleanup_lambda_handler(event, context):
-    LOGGER.info("Cleanup handler called")
-    cleanup_queues()
