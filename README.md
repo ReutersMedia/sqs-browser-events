@@ -31,9 +31,7 @@ Your backend application should generally create the session for the user and sh
 
 For the `/create` method, you should supply an account ID and a session ID.  The account ID is used to partition the DynamoDB queue table, and support broadcast of messages to all logged in users for an account.  The session ID should be unique across all login sessions, as each client needs their own SQS queue.  The Session ID should be a string no longer than 256 characters.
 
-The Cognito credentials expire after serveral hours, and periodically need to be renewed.  The client therefore needs to know the expiration time and request a refresh of the credentials.  The Cognito user also expires after several days without use.  The SQS Queues however need to be managed.  To cleanup unused Queues, a cleanup procedure is called every 6 hours via a Lambda cron, or can be called using the `/cleanup` API Gateway method.  The cleanup procedure will look for SQS queues that are no longer referenced in the DyanmoDB session table, and delete them.
-
-Note that messages may accumulate while a user is not active, if they return and the same Session ID is used.
+The Cognito credentials expire after serveral hours, and periodically need to be renewed.  The client therefore needs to know the expiration time and request a refresh of the credentials.  The Cognito user also expires after several days without use.  The SQS Queues however need to be managed and cleaned up once they are no longer in use.  To facilitate this, a `ttl` field is set on each session table entry.  TTL Management should be turned on for the table, using the field `ttl`.  This has to be done manually, as the CloudFormation template does not support configuring TTL management.  The SessionUpdateProcessor lambda function listens on the event stream from the Session table, looks for SQS Urls that are no longer in use, and deletes them.
 
 A message can optionally provide a `messageId` field, which will be used as part of the primary key in the DynamoDB table that stores user messages.  If one is not provided, a hash of the Kinesis eventID will be used for stream events, or a hash of the timestamp and the message in the case of events posted via the API Gateway.
 
@@ -235,7 +233,9 @@ Both of the read-receipt endpoints also accept an "async" query parameter.  If i
 
 ## Deploying
 
-Deployment requires installation of serverless (http://serverless.com), and this project was  built with version 1.9.  Deployments require an environment name and a region.  For example:
+Deployment requires installation of serverless (http://serverless.com), and this project was built with version 1.9.  Prior to deployment, you will need to set up a Cognito identity pool, as described above.  After deployment, you should also turn on TTL Management for the Session table, using the `ttl` field.  This is necessary for automatic cleanup of unused SQS queues.  Neither of these two configuration steps can be performed with CloudFormation templates, and must be done manually.
+
+Deployments require an environment name and a region.  For example:
 
 ```
 # serverless deploy --env prod --region eu-west-1
