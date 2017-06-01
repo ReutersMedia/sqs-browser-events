@@ -58,8 +58,8 @@ provider:
     COGNITO_REGION: ${opt:cognito-region, self:provider.defCognitoRegion}
     SESSION_TABLE: ${self:custom.sessionTable}
     SESSION_TABLE_ACCOUNT_GSI: ${self:custom.sessionTable}-gsi-account
-    COGNITO_IDENTITY_POOL: ${opt:poolname, self:provider.defPoolName}
-    SQS_QUEUE_PREFIX: cognito-sqs-${opt:env}
+    COGNITO_IDENTITY_POOL: ${self:custom.cognitoPoolName}
+    SQS_QUEUE_PREFIX: ${self:custom.sqsQueuePrefix}
     HISTORY_TABLE: ${self:custom.historyTable}
     SQS_SENDER_LAMBDA: ${self:custom.sqsSender}
     DISPATCHER_LAMBDA: ${self:custom.eventDispatcher}
@@ -77,6 +77,7 @@ provider:
 custom:
   version: ${opt:version, self:provider.defVersion}
   region: ${opt:region}
+  sqsQueuePrefix: cognito-sqs-${opt:env}
   sessionTable: ${opt:env}-sqs-browser-sessions
   browserEventStream: ${opt:env}-sqs-browser-event-stream
   historyTable: ${opt:env}-sqs-browser-messages
@@ -87,6 +88,7 @@ custom:
   sessionUpdateProcessor: ${opt:env}-sqs-browser-session-updates
   sessionManagerAPI: ${opt:env}-sqs-browser-session-manager-api
   userMessageAPI: ${opt:env}-sqs-browser-user-messages
+  cognitoPoolName: ${opt:poolname, self:provider.defPoolName}
 functions:
   SessionUpdateProcessor:
     handler: session_update.lambda_handler
@@ -282,6 +284,59 @@ resources:
           WriteCapacityUnits: 5
         StreamSpecification:
           StreamViewType: NEW_AND_OLD_IMAGES
+    cognitoPool:
+      Type: "AWS::Cognito::IdentityPool"
+      Properties:
+        IdentityPoolName: ${self:custom.cognitoPoolName}
+        AllowUnauthenticatedIdentities: true
+    cognitoPoolRole:
+      Type: "AWS::Cognito::IdentityPoolRoleAttachment"
+      DependsOn:
+        - cognitoPool
+        - cognitoSQSBrowserRole
+      Properties:
+        IdentityPoolId:
+          Ref: cognitoPool
+        Roles:
+          unauthenticated:
+            Fn::GetAtt:
+              - cognitoSQSBrowserRole
+              - Arn
+    cognitoSQSBrowserRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        RoleName: cognitoSQSBrowserRole
+        Policies:
+          -
+            PolicyName: "cognitoSQSBrowserRolePolicy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                -
+                  Effect: Allow
+                  Action:
+                    - "sqs:ReceiveMessage"
+                    - "sqs:GetQueueAttributes"
+                    - "sqs:DeleteMessage"
+                    - "sqs:DeleteMessageBatch"
+                    - "sqs:PurgeQueue"
+                  Resource: "arn:aws:sqs:*:*:${self:custom.sqsQueuePrefix}*"
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Action: "sts:AssumeRoleWithWebIdentity"
+              Principal:
+                Federated:
+                  - "cognito-identity.amazonaws.com"
+              Condition:
+                StringEquals:
+                  "cognito-identity.amazonaws.com:aud":
+                    Ref: cognitoPool
+                "ForAnyValue:StringLike":
+                  "cognito-identity.amazonaws.com:amr":
+                    "unauthenticated"
     sessionManagerAPIErrorMetricFilter:
       Type: "AWS::Logs::MetricFilter"
       Properties:

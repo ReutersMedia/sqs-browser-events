@@ -94,58 +94,6 @@ output: this is test
 
 It is not practical to limit access of an SQS queue to a specific Cognito user.  If a third party can guess the ID of a user, and then guess the URL of an SQS endpoint, they have access to the SQS queue.  However these IDs and URLs are generated using a cryptographic hash, and so are not predictable.  The encryption key ensures that only the holder of the encryption key can decrypt the message.  This is a sufficient security model for most but not all use cases. 
 
-## Creating a Cognito Identity Pool
-
-A stack needs a Cognito user pool, and this cannot be set up via Cloud Formation.  One identity pool however can be shared by a number of stacks, and the serverless.yml file requires a pool with the name "sqs_browser".  This can be overridden with a "--poolname" argument. 
-
-To create the pool, log into the AWS console, and select the Cognito service.  Click on "Manage Federated Identities".  Then select "Create a new identity pool".  For the identity pool name, use "sqs_browser".  Under "Unauthenticated identities" select "Enable access to unauthenticated identities".  Then click "Create Pool".  This will allow the application to create users as needed, without using a 3rd party to authenticate them.
-
-Then create a new IAM role, with the trust relationship given below, using the Pool ID from the above Cognito pool.  Associate this role with unauthenticated users via the console.
-
-```
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "cognito-identity.amazonaws.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "cognito-identity.amazonaws.com:aud": "<COGNITO POOL ID>"
-        },
-        "ForAnyValue:StringLike": {
-          "cognito-identity.amazonaws.com:amr": "unauthenticated"
-        }
-      }
-    }
-  ]
-}
-```
-
-And embed the following inline policy, which allows access to all queues with the given name prefix.  Note that queue message privacy is based on encryption of the queue messages, and use of a cyrptographic hash to generate queue URLs.
-
-```
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "sqs:ReceiveMessage",
-                "sqs:GetQueueAttributes",
-                "sqs:DeleteMessage",
-                "sqs:DeleteMessageBatch",
-                "sqs:PurgeQueue"
-            ],
-            "Resource": "arn:aws:sqs:*:*:cognito-sqs-*"
-        }
-    ]
-}
-```
-
 
 ## Session Manager API
 
@@ -233,7 +181,14 @@ Both of the read-receipt endpoints also accept an "async" query parameter.  If i
 
 ## Deploying
 
-Deployment requires installation of serverless (http://serverless.com), and this project was built with version 1.9.  Prior to deployment, you will need to set up a Cognito identity pool, as described above.  After deployment, you should also turn on TTL Management for the Session table, using the `ttl` field.  This is necessary for automatic cleanup of unused SQS queues.  Neither of these two configuration steps can be performed with CloudFormation templates, and must be done manually.
+Deployment requires installation of serverless (http://serverless.com), and this project was built with version 1.9.  After deployment, you should also turn on TTL Management for the Session table, using the `ttl` field.  This is necessary for automatic cleanup of unused SQS queues and Cognito identities, and can't be done via CloudFormation at this time.
+
+```
+aws dynamodb update-time-to-live --table-name [ENV]-sqs-browser-sessions --time-to-live-specification "Enabled=true, AttributeName=ttl"
+```
+
+The stack also needs a Cognito user pool.  One identity pool however can be shared by a number of stacks.  By default the serverless.yml file will use the pool name "sqs_browser", but this can overridden with a "--poolname" argument. 
+
 
 Deployments require an environment name and a region.  For example:
 

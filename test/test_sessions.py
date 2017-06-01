@@ -19,6 +19,7 @@ from requests_aws4auth import AWS4Auth
 
 from common import get_msgs
 
+import botocore.exceptions
 
 class TestSessions(unittest.TestCase):
     
@@ -178,6 +179,12 @@ class TestSessions(unittest.TestCase):
                            'sessionId':session1a})
         # takes time for lambda to pick up, and queue deletes are not instantaneous
         time.sleep(30)
+        # check whether Cognito ID still exists
+        cog_c = boto3.client('cognito-identity')
+        with self.assertRaises(botocore.exceptions.ClientError):
+            print("checking identity {0}".format(item['identityId']))
+            r = cog_c.describe_identity(IdentityId=item['identityId'])
+            
         # check whether SQS queue still exists
         sqs_c = boto3.client('sqs')
         queues = sqs_c.list_queues(QueueNamePrefix=item['sqsQueueName'])
