@@ -1,0 +1,44 @@
+#!/usr/bin/python
+
+import boto3
+import requests
+import sys
+import os
+import json
+import time
+
+from requests_aws4auth import AWS4Auth
+
+def get_api_gateway(env,region):
+    name = env+'-sqsbrowserevents'
+    client = boto3.client('apigateway',region_name=region)
+    r = client.get_rest_apis()
+    gwlist = [x['id'] for x in r['items'] if x['name']==name]
+    if len(gwlist)==0:
+        print "Unable to locate API Gateway"
+        sys.exit(1)
+    gw_id = gwlist[0]
+    return "https://{0}.execute-api.{1}.amazonaws.com/{2}".format(gw_id,region,env)
+    
+def call_gw(url,region,params=None):
+    auth = AWS4Auth(os.getenv('AWS_ACCESS_KEY_ID'),
+                    os.getenv('AWS_SECRET_ACCESS_KEY'),
+                    region,
+                    'execute-api')
+    tstart = time.time()
+    resp = requests.get(url,params=params,auth=auth)
+    d = json.loads(resp.text)
+    return d
+
+
+if len(sys.argv)<4:
+    print "usage: {0} env region gateway-url".format(sys.argv[0])
+    print ""
+    print "example:  {0} demo us-east-2 /create/1234/5678/9012".format(sys.argv[0])
+    print ""
+    sys.exit(1)
+
+gw = get_api_gateway(sys.argv[1],sys.argv[2])
+d = call_gw(gw+sys.argv[3],sys.argv[2])
+print json.dumps(d,indent=4)
+
