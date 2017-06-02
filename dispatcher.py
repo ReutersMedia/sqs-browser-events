@@ -109,7 +109,7 @@ def check_save_history(msg):
 
 
 def dispatch(msg_d, exp_time):
-    LOGGER.info("Dispatching messages, expires in {0}".format(exp_time-time.time()))
+    LOGGER.info("Dispatching messages, lambda time remaining {0}".format(exp_time-time.time()))
     # look up queues
     queue_d = defaultdict(list)
     user_d = defaultdict(list)
