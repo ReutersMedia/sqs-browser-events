@@ -114,12 +114,17 @@ def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None, msg_rete
 
     # also encode creation time / 10000, to roughly determine age
     # useful later for cleanup
-    queue_name = os.getenv('SQS_QUEUE_PREFIX') + '-' + \
-                 base64.urlsafe_b64encode(hashlib.sha1("{0}-{1}".format(account_id,session_id)).digest()).replace('=','') + \
-                 '-' + str(int(time.time()/QUEUE_CREATE_TIME_DIVISOR))
-    # unix /dev/random has more entropy than /dev/urandom, and python random
-    with open('/dev/random','rb') as f_rand:
+    with open('/dev/urandom','rb') as f_rand:
         aes_key = f_rand.read(32)
+        queue_rand = f_rand.read(32)
+
+    queue_name = os.getenv('SQS_QUEUE_PREFIX') + '-' + \
+                 base64.urlsafe_b64encode(queue_rand)
+    if len(queue_name)>80:
+        LOGGER.warn("Queue name is too long, max 80 characters.  Trimming.  Try shortening the queue prefix.")
+        queue_name = queue_name[:80]
+        
+    # unix /dev/random has more entropy than /dev/urandom, and python random
     q_attr = {'MessageRetentionPeriod':msg_retention_period}
     if policy is not None:
         q_attr['Policy'] = json.dumps(policy)
