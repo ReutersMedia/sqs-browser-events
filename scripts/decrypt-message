@@ -1,0 +1,30 @@
+#!/usr/bin/python
+
+import pyaes
+import base64
+import sys
+import json
+
+if len(sys.argv)<2:
+    print "usage: {0} aes-key".format(sys.argv[0])
+    sys.exit(1)
+    
+aes_key = sys.argv[1]
+
+d_raw = sys.stdin.read(10000)
+if len(d_raw.strip())==0:
+    sys.exit(0)
+
+d = json.loads(d_raw)
+
+try:
+    m = d['Messages'][0]
+    init_ctr,msg_b64 = m['Body'].split('|',1)
+    ctr = pyaes.Counter(initial_value=int(init_ctr))
+    aes = pyaes.AESModeOfOperationCTR(base64.b64decode(aes_key),counter=ctr)
+    print aes.decrypt(base64.b64decode(msg_b64))
+    
+except:
+    raise
+    
+
