@@ -119,11 +119,10 @@ def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None, msg_rete
         queue_rand = f_rand.read(32)
 
     queue_name = os.getenv('SQS_QUEUE_PREFIX') + '-' + \
-                 base64.urlsafe_b64encode(queue_rand)
+                 base64.urlsafe_b64encode(queue_rand).replace('=','')
     if len(queue_name)>80:
         LOGGER.warn("Queue name is too long, max 80 characters.  Trimming.  Try shortening the queue prefix.")
         queue_name = queue_name[:80]
-        
     # unix /dev/random has more entropy than /dev/urandom, and python random
     q_attr = {'MessageRetentionPeriod':msg_retention_period}
     if policy is not None:
@@ -137,6 +136,8 @@ def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None, msg_rete
             r = sqs_c.get_queue_url(QueueName=queue_name)
             sqs_c.set_queue_attributes(QueueUrl=r['QueueUrl'],
                                        Attributes={'Policy':json.dumps(policy)})
+        else:
+            raise
     queue_url = r['QueueUrl']
     # create an encryption key
     
