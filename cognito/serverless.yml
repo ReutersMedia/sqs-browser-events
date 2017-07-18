@@ -1,0 +1,76 @@
+service: sqsbrowserevents-cognito
+
+provider:
+  name: aws
+  runtime: python2.7
+  stage: ${opt:env}
+  defPoolName: "sqs_browser"
+  defVersion: "0.0.0"
+  defCognitoRegion: ${opt:region}
+  cfLogs: true
+  region: ${opt:region}
+  stackTags:
+    application: sqs-browser-events-cognito
+    environment: ${opt:env}
+    release-tag: ${self:custom.version}
+custom:
+  version: ${opt:version, self:provider.defVersion}
+  sqsQueuePrefix: cognito-sqs-${opt:env}
+  # accept optional region congif for compatibility with main serverless script
+  cognitoRegion: ${opt:cognito-region, self:provider.defCognitoRegion}
+  cognitoPoolName: ${opt:poolname, self:provider.defPoolName}
+resources:
+  Resources:
+    cognitoPool:
+      Type: "AWS::Cognito::IdentityPool"
+      Properties:
+        IdentityPoolName: ${self:custom.cognitoPoolName}
+        AllowUnauthenticatedIdentities: true
+    cognitoPoolRole:
+      Type: "AWS::Cognito::IdentityPoolRoleAttachment"
+      DependsOn:
+        - cognitoPool
+        - cognitoUserSQSBrowserRole
+      Properties:
+        IdentityPoolId:
+          Ref: cognitoPool
+        Roles:
+          unauthenticated:
+            Fn::GetAtt:
+              - cognitoUserSQSBrowserRole
+              - Arn
+    cognitoUserSQSBrowserRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        RoleName: cognitoUserSQSBrowserRole
+        Policies:
+          -
+            PolicyName: "cognitoUserSQSBrowserRolePolicy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                -
+                  Effect: Allow
+                  Action:
+                    - "sqs:ReceiveMessage"
+                    - "sqs:GetQueueAttributes"
+                    - "sqs:DeleteMessage"
+                    - "sqs:DeleteMessageBatch"
+                    - "sqs:PurgeQueue"
+                  Resource: "arn:aws:sqs:*:*:${self:custom.sqsQueuePrefix}*"
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Action: "sts:AssumeRoleWithWebIdentity"
+              Principal:
+                Federated:
+                  - "cognito-identity.amazonaws.com"
+              Condition:
+                StringEquals:
+                  "cognito-identity.amazonaws.com:aud":
+                    Ref: cognitoPool
+                "ForAnyValue:StringLike":
+                  "cognito-identity.amazonaws.com:amr":
+                    "unauthenticated"
