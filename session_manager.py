@@ -123,7 +123,6 @@ def create_sqs_queue(account_id, user_id, session_id, restrict_ip=None, msg_rete
     if len(queue_name)>80:
         LOGGER.warn("Queue name is too long, max 80 characters.  Trimming.  Try shortening the queue prefix.")
         queue_name = queue_name[:80]
-    # unix /dev/random has more entropy than /dev/urandom, and python random
     q_attr = {'MessageRetentionPeriod':msg_retention_period}
     if policy is not None:
         q_attr['Policy'] = json.dumps(policy)

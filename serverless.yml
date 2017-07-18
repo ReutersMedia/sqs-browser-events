@@ -25,6 +25,9 @@ provider:
         - dynamodb:DeleteItem
         - dynamodb:GetRecords
         - dynamodb:BatchWriteItem
+        - dynamodb:GetShardIterator
+        - dynamodb:DescribeStream
+        - dynamodb:ListStreams
       Resource:
         - "arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.sessionTable}*"
         - "arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.historyTable}*"
@@ -55,7 +58,7 @@ provider:
         - sqs:*
       Resource: "*"
   environment:
-    COGNITO_REGION: ${opt:cognito-region, self:provider.defCognitoRegion}
+    COGNITO_REGION: ${self:custom.cognitoRegion}
     SESSION_TABLE: ${self:custom.sessionTable}
     SESSION_TABLE_ACCOUNT_GSI: ${self:custom.sessionTable}-gsi-account
     COGNITO_IDENTITY_POOL: ${self:custom.cognitoPoolName}
@@ -75,6 +78,7 @@ provider:
   include:
     - lib/**
 custom:
+  cognitoRegion: ${opt:cognito-region, self:provider.defCognitoRegion}
   version: ${opt:version, self:provider.defVersion}
   region: ${opt:region}
   sqsQueuePrefix: cognito-sqs-${opt:env}
@@ -194,6 +198,11 @@ functions:
           method: get
           path: /notify/user/{userId}
 resources:
+  Conditions:
+    CreateCognitoPool:
+      Fn::Equals:
+        - ${self:custom.cognitoRegion}
+        - ""
   Resources:
     ApiGatewayMethodCreateAccountidVarUseridVarSessionidVarGet:
       Properties:
@@ -286,29 +295,32 @@ resources:
           StreamViewType: NEW_AND_OLD_IMAGES
     cognitoPool:
       Type: "AWS::Cognito::IdentityPool"
+      Condition: CreateCognitoPool
       Properties:
         IdentityPoolName: ${self:custom.cognitoPoolName}
         AllowUnauthenticatedIdentities: true
     cognitoPoolRole:
       Type: "AWS::Cognito::IdentityPoolRoleAttachment"
+      Condition: CreateCognitoPool
       DependsOn:
         - cognitoPool
-        - cognitoSQSBrowserRole
+        - cognitoUserSQSBrowserRole
       Properties:
         IdentityPoolId:
           Ref: cognitoPool
         Roles:
           unauthenticated:
             Fn::GetAtt:
-              - cognitoSQSBrowserRole
+              - cognitoUserSQSBrowserRole
               - Arn
-    cognitoSQSBrowserRole:
+    cognitoUserSQSBrowserRole:
       Type: "AWS::IAM::Role"
+      Condition: CreateCognitoPool
       Properties:
-        RoleName: cognitoSQSBrowserRole
+        RoleName: cognitoUserSQSBrowserRole
         Policies:
           -
-            PolicyName: "cognitoSQSBrowserRolePolicy"
+            PolicyName: "cognitoUserSQSBrowserRolePolicy"
             PolicyDocument:
               Version: "2012-10-17"
               Statement:
