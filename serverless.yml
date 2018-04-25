@@ -3,6 +3,7 @@ service: sqsbrowserevents
 provider:
   name: aws
   runtime: python2.7
+  deploymentBucket: ${opt:region}-reuters-serverless-artifactory
   stage: ${opt:env}
   defPoolName: "sqs_browser"
   defVersion: "0.0.0"
