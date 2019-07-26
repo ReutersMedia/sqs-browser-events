@@ -238,6 +238,7 @@ resources:
         AuthorizationType: AWS_IAM
     browserEventStream:
       Type: AWS::Kinesis::Stream
+      DeletionPolicy: Retain
       Properties:
         Name: ${self:custom.browserEventStream}
         ShardCount: 10
